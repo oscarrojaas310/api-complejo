@@ -19,7 +19,7 @@ app.use('/api/piscina', rutasPiscina);
 
 // Ruta de diagnóstico del backend
 app.get('/', (req, res) => {
-  res.send('Servidor de api-complejo corriendo en PostgreSQL y listo para la piscina 🏊🚀');
+  res.send('Servidor de api-complejo corriendo en MYSQL y listo para la piscina 🏊🚀');
 });
 
 app.listen(PORT, () => {

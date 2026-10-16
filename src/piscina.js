@@ -13,8 +13,7 @@ router.post('/inscripciones', async (req, res) => {
     nombre_representante,
     cedula_representante,
     telefono_representante,
-    nivel,
-    horario_assigned // Asegúrate de recibirlo tal cual lo manda tu frontend
+    nivel
   } = req.body;
 
   // Validación en el servidor
@@ -24,12 +23,9 @@ router.post('/inscripciones', async (req, res) => {
     });
   }
 
-  // Capturamos el horario_asignado del body
   const horario_asignado = req.body.horario_asignado;
 
   try {
-    // Consulta SQL estructurada para tu tabla MySQL
-    // Nota: id es AUTO_INCREMENT y registrado_el usa el tiempo del servidor mediante NOW()
     const queryText = `
       INSERT INTO alumnos (
         nombre_alumno, 
@@ -50,12 +46,12 @@ router.post('/inscripciones', async (req, res) => {
       nombre_alumno,
       parseInt(edad_alumno, 10),
       direccion,
-      es_menor_edad ? 1 : 0, // En MySQL los booleanos se guardan como 1 (true) o 0 (false)
+      es_menor_edad ? 1 : 0,
       nombre_representante,
       cedula_representante,
       telefono_representante,
       nivel,
-      horario_asignado
+      horario_assigned = horario_asignado
     ];
 
     await pool.query(queryText, values);
@@ -71,80 +67,99 @@ router.post('/inscripciones', async (req, res) => {
     });
   }
 });
-// GET: Obtener estadísticas globales y listado de alumnos (Morosos y Turnos)
+
+// GET: Panel de control con cálculo de morosidad por mes vencido y beneficio del día 16
 router.get('/dashboard', async (req, res) => {
   try {
-    // 1. Traer todos los alumnos de la base de datos de Aiven
+    // 1. Obtener todos los alumnos y pagos de Aiven MySQL
     const [alumnos] = await pool.query('SELECT * FROM alumnos ORDER BY registrado_el DESC');
+    const [pagos] = await pool.query('SELECT alumno_id, mes_pagado FROM pagos');
 
-    // 2. Lógica del Día 16 para evaluar Morosidad en Caliente
     const hoy = new Date();
-    const diaActual = hoy.getDate();
-    
-    // Obtenemos el mes y año en curso (Ej: "octubre de 2026")
-    const opcionesMes = { month: 'long', year: 'numeric' };
-    const mesActualTexto = hoy.toLocaleDateString('es-VE', opcionesMes);
+    const anoActual = hoy.getFullYear();
+    const mesActual = hoy.getMonth(); 
 
-    // Procesamos cada alumno para inyectarle su estatus financiero real
-    const alumnosProcesados = alumnos.map(alumno => {
-      let estatus_pago = 'al_dia';
-      
-      // Regla de negocio: Si ya pasamos el 16 del mes y no hay registro de pago, pasa a moroso
-      if (diaActual >= 16) {
-        // NOTA FUTURA: Aquí evaluarás contra tu tabla de "pagos". 
-        // Por ahora, simulamos morosidad si el alumno se registró en meses anteriores y no este mes.
-        const mesRegistro = new Date(alumno.registrado_el).toLocaleDateString('es-VE', opcionesMes);
-        if (mesRegistro !== mesActualTexto) {
-          estatus_pago = 'moroso';
+    const listaMorosos = [];
+    
+    // Inicializamos las mallas reales para el conteo dinámico
+    let turnosMañanaCount = { '08:00 AM - 09:00 AM': 0, '09:00 AM - 10:00 AM': 0, '10:00 AM - 11:00 AM': 0 };
+    let turnosTardeCount = { '03:00 PM - 04:00 PM': 0, '04:00 PM - 05:00 PM': 0, '05:00 PM - 06:00 PM': 0 };
+
+    alumnos.forEach(alumno => {
+      // Contabilizar alumnos en los turnos
+      if (turnosMañanaCount[alumno.horario_asignado] !== undefined) turnosMañanaCount[alumno.horario_asignado]++;
+      if (turnosTardeCount[alumno.horario_asignado] !== undefined) turnosTardeCount[alumno.horario_asignado]++;
+
+      const fechaReg = new Date(alumno.registrado_el);
+      let anoInicioDeuda = fechaReg.getFullYear();
+      let mesInicioDeuda = fechaReg.getMonth();
+      const diaReg = fechaReg.getDate();
+
+      // REGLA DEL 16: Si se inscribió del 16 en adelante, su obligación financiera empieza el mes siguiente
+      if (diaReg >= 16) {
+        if (mesInicioDeuda === 11) { 
+          mesInicioDeuda = 0;
+          anoInicioDeuda++;
+        } else {
+          mesInicioDeuda++;
         }
       }
 
-      return {
-        ...alumno,
-        estatus_pago
-      };
+      // Calculamos cuántos meses han transcurrido desde su mes de inicio exigible hasta el mes ACTUAL
+      const mesesTranscurridos = (anoActual - anoInicioDeuda) * 12 + (mesActual - mesInicioDeuda) + 1;
+
+      // REGLA DE MOROSIDAD AMIGABLE: El mes en curso NO cuenta como deuda pendiente para la lista de morosos.
+      const mesesExigiblesVencidos = mesesTranscurridos - 1;
+
+      if (mesesExigiblesVencidos <= 0) {
+        return; 
+      }
+
+      // Buscar qué meses ha pagado el alumno en la base de datos
+      const mesesPagados = pagos.filter(p => p.alumno_id === alumno.id).length;
+
+      // La deuda real son los meses del pasado que ya cerraron y que aún no ha pagado
+      const mesesDeuda = mesesExigiblesVencidos - mesesPagados;
+
+      if (mesesDeuda > 0) {
+        listaMorosos.push({
+          ...alumno,
+          mesesDeuda: mesesDeuda,
+          montoDolares: mesesDeuda * 20, 
+          alertaCritica: mesesDeuda > 1 
+        });
+      }
     });
 
-    // 3. Filtrar alumnos morosos para la tabla del dueño
-    const listaMorosos = alumnosProcesados.filter(a => a.estatus_pago === 'moroso');
+    // ORDENAR: Los morosos que deben más meses (críticos) encabezan la lista
+    listaMorosos.sort((a, b) => b.mesesDeuda - a.mesesDeuda);
 
-    // 4. Calcular la distribución de alumnos por turnos reales
-    const turnosMañana = [
-      { horario: '08:00 AM - 09:00 AM', nivel: 'Infantil / Iniciación', alumnos: 0 },
-      { horario: '09:00 AM - 10:00 AM', nivel: 'Adultos / Master', alumnos: 0 },
-      { horario: '10:00 AM - 11:00 AM', nivel: 'Libre / Práctica', alumnos: 0 }
-    ];
+    // Mapear los contadores al formato que espera el componente de React
+    const turnos_manana = Object.keys(turnosMañanaCount).map(h => ({ 
+      horario: h, 
+      nivel: h === '08:00 AM - 09:00 AM' ? 'Infantil / Iniciación' : h === '09:00 AM - 10:00 AM' ? 'Adultos / Master' : 'Libre / Práctica', 
+      alumnos: turnosMañanaCount[h] 
+    }));
 
-    const turnosTarde = [
-      { horario: '03:00 PM - 04:00 PM', nivel: 'Infantil / Adaptación', alumnos: 0 },
-      { horario: '04:00 PM - 05:00 PM', nivel: 'Juvenil / Estilos', alumnos: 0 },
-      { horario: '05:00 PM - 06:00 PM', nivel: 'Entrenamiento Avanzado', alumnos: 0 }
-    ];
+    const turnos_tarde = Object.keys(turnosTardeCount).map(h => ({ 
+      horario: h, 
+      nivel: h === '03:00 PM - 04:00 PM' ? 'Infantil / Adaptación' : h === '04:00 PM - 05:00 PM' ? 'Juvenil / Estilos' : 'Entrenamiento Avanzado', 
+      alumnos: turnosTardeCount[h] 
+    }));
 
-    // Contar cuántos alumnos pertenecen a cada turno en tiempo real
-    alumnosProcesados.forEach(alumno => {
-      const mallaM = turnosMañana.find(t => t.horario === alumno.horario_asignado);
-      const mallaT = turnosTarde.find(t => t.horario === alumno.horario_asignado);
-      
-      if (mallaM) mallaM.alumnos++;
-      if (mallaT) mallaT.alumnos++;
-    });
-
-    // 5. Enviar el paquete consolidado al frontend
     return res.status(200).json({
-      total_activos: alumnosProcesados.length,
+      total_activos: alumnos.length,
       total_morosos: listaMorosos.length,
-      monto_por_recaudar: listaMorosos.length * 20, // Asumiendo una mensualidad base de $20
+      monto_por_recaudar: listaMorosos.reduce((sum, m) => sum + m.montoDolares, 0),
       morosos: listaMorosos,
-      turnos_manana: turnosMañana,
-      turnos_tarde: turnosTarde
+      turnos_manana,
+      turnos_tarde
     });
 
   } catch (error) {
-    console.error('Error al calcular métricas en MySQL:', error);
-    return res.status(500).json({ error: 'Error al cargar el panel de control.' });
+    console.error('Error en el cálculo de morosidad amigable:', error);
+    return res.status(500).json({ error: 'Error al procesar el reporte de caja.' });
   }
 });
-
 
 module.exports = router;

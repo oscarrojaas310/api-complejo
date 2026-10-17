@@ -17,6 +17,7 @@ app.use(express.json()); // Habilita la lectura de formatos JSON (req.body)
 // Tu ruta final será: http://localhost:5000/api/piscina/inscripciones
 app.use('/api/piscina', rutasPiscina);
 
+
 // Ruta de diagnóstico del backend
 app.get('/', (req, res) => {
   res.send('Servidor de api-complejo corriendo en MYSQL y listo para la piscina 🏊🚀');

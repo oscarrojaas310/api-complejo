@@ -362,6 +362,10 @@ router.get('/tasa-bcv', async (req, res) => {
   }
 });
 
+
+
+
+
 // PUT: Actualizar la ficha de un alumno por su ID
 router.put('/alumnos/:id', async (req, res) => {
   const { id } = req.params; // Captura el ID de la URL

@@ -347,19 +347,18 @@ router.get('/tasa-bcv', async (req, res) => {
     }
     throw new Error(`Servidor DolarApi respondió con estatus: ${respuesta.status}`);
 
-  } catch (errorApi) {
-    // 🚨 PLAN DE CONTINGENCIA: Si la API colapsa o el internet de la nube experimenta microcortes
-    console.warn(`⚠️ Alerta de Red en Render (${errorApi.message}). Activando respaldo estático de seguridad.`);
+  // src/piscina.js (Ajuste final de precisión)
+    } catch (errorAlternativo) {
+      console.error("❌ Todas las consultas automatizadas colapsaron. Activando contingencia fija.");
+      
+      // ✅ MODIFICA ESTA LÍNEA: Cambia 880.00 por el valor real con decimales
+      return res.status(200).json({ 
+        tasa: 883.39, 
+        origen: 'contingencia_estatica_los_pinos',
+        nota: "Sincronización en vivo temporalmente fuera de servicio."
+      });
+    }
 
-    // Base de respaldo verídica para el negocio ante apagones de red
-    const tasaRespaldoReal = 883.40; 
-
-    return res.status(200).json({ 
-      tasa: tasaRespaldoReal, 
-      origen: 'contingencia_estatica_los_pinos',
-      nota: "Automatización en vivo fuera de servicio temporalmente por red, usando base referencial."
-    });
-  }
 });
 
 

@@ -313,56 +313,54 @@ router.get('/alumnos-lista', async (req, res) => {
     return res.status(500).json({ error: 'Error al cargar la nómina de alumnos.' });
   }
 });
-// ENDPOINT: Consultar la tasa oficial BCV desde el servidor (Evita bloqueos CORS en elde VEX Wallet
-
-
-// ENDPOINT: Consultar la tasa oficial del dólar en vivo desde el servidor
+// ENDPOINT: Consultar la tasa oficial BCV de forma automática (LÓGICA AUTOMATIZADA)
 router.get('/tasa-bcv', async (req, res) => {
-  // 🌟 ENDPOINT ABIERTO DE PRODUCCIÓN: CDN global de tipos de cambio libre de bloqueos Cloudflare
-  const urlApiGlobal = 'https://er-api.com';
+  // 🌟 ENDPOINT REAL DE DATOS: DolarApi oficial comunitaria para Venezuela
+  const urlApiVenezuela = 'https://dolarapi.com';
 
   const configuracionHeaders = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AdminPiscinaLosPinos/1.0',
     'Accept': 'application/json'
   };
 
   try {
-    // ---- INTENTO 1: CONSULTA EN VIVO A LA API DE TASAS GLOBAL ----
-    const respuesta = await fetch(urlApiGlobal, { 
+    // ---- INTENTO 1: CONSULTA EN VIVO AUTOMÁTICA A DOLARAPI ----
+    const respuesta = await fetch(urlApiVenezuela, { 
       headers: configuracionHeaders,
-      timeout: 5000 // Si tarda más de 5 segundos, aborta para no congelar el frontend
+      timeout: 5000 // Aborta si el servidor tarda más de 5 segundos para no colgar el PWA
     });
     
     if (respuesta.status === 200) {
       const data = await respuesta.json();
-      // Captura el valor asignado para el Bolívar (VES) en el mercado internacional
-      const tasaCalculada = parseFloat(data?.rates?.VES);
+      
+      // DolarApi entrega la cotización directa en la propiedad "promedio"
+      const tasaCalculada = parseFloat(data?.promedio);
       
       if (tasaCalculada && tasaCalculada > 0) {
-        console.log(`📊 Tasa Sincronizada con éxito en la nube (API Global): ${tasaCalculada} VES`);
+        console.log(`📊 Automatización Exitosa: Tasa BCV al día en Render: ${tasaCalculada} VES`);
         return res.status(200).json({ 
           tasa: tasaCalculada, 
-          origen: 'api_exchange_rate_live' 
+          origen: 'dolar_api_venezuela_live',
+          fecha_actualizacion: data?.fechaActualizacion
         });
       }
     }
-    throw new Error(`Servidor de tasas saturado o respondió con estatus: ${respuesta.status}`);
+    throw new Error(`Servidor DolarApi respondió con estatus: ${respuesta.status}`);
 
   } catch (errorApi) {
-    // 🚨 PLAN DE CONTINGENCIA: Si la API global falla o el servidor experimenta microcortes de red
-    console.warn(`⚠️ Alerta de Red en Render (${errorApi.message}). Activando respaldo estático.`);
+    // 🚨 PLAN DE CONTINGENCIA: Si la API colapsa o el internet de la nube experimenta microcortes
+    console.warn(`⚠️ Alerta de Red en Render (${errorApi.message}). Activando respaldo estático de seguridad.`);
 
-    // ✅ SEGURO Y COHERENTE: Mantenemos el orden real de magnitud de su balance comercial
-    const tasaRespaldoReal = 880.00; 
+    // Base de respaldo verídica para el negocio ante apagones de red
+    const tasaRespaldoReal = 883.40; 
 
     return res.status(200).json({ 
       tasa: tasaRespaldoReal, 
       origen: 'contingencia_estatica_los_pinos',
-      nota: "Sincronización automatizada temporalmente fuera de servicio, usando base de respaldo."
+      nota: "Automatización en vivo fuera de servicio temporalmente por red, usando base referencial."
     });
   }
 });
-
 
 // PUT: Actualizar la ficha de un alumno por su ID
 router.put('/alumnos/:id', async (req, res) => {

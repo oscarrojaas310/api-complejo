@@ -83,9 +83,19 @@ router.get('/dashboard', async (req, res) => {
     const listaPendientes = [];
     const listaSolventes = [];
     
-    // Inicializamos las mallas reales para el conteo dinámico
-    let turnosMañanaCount = { '08:00 AM - 09:00 AM': 0, '09:00 AM - 10:00 AM': 0, '10:00 AM - 11:00 AM': 0 };
-    let turnosTardeCount = { '03:00 PM - 04:00 PM': 0, '04:00 PM - 05:00 PM': 0, '05:00 PM - 06:00 PM': 0 };
+    //  Y PEGA TUS TURNOS REALES EXACTAMENTE COMO LOS GUARDA EL FORMULARIO:
+    let turnosMañanaCount = { 
+      'Sábados y Domingos: 09:00 AM - 10:00 AM': 0 
+    };
+    
+    let turnosTardeCount = { 
+      'Martes a Jueves: 01:00 PM - 02:00 PM': 0, 
+      'Martes a Jueves: 02:00 PM - 03:00 PM': 0, 
+      'Martes a Jueves: 03:00 PM - 04:00 PM': 0, 
+      'Martes a Jueves: 04:00 PM - 05:00 PM': 0, 
+      'Martes a Jueves: 05:00 PM - 06:00 PM': 0, 
+      'Martes a Jueves: 06:00 PM - 07:00 PM': 0 
+    };
 
     alumnos.forEach(alumno => {
       // Contabilizar alumnos en los turnos
@@ -96,16 +106,6 @@ router.get('/dashboard', async (req, res) => {
       let anoInicioDeuda = fechaReg.getFullYear();
       let mesInicioDeuda = fechaReg.getMonth();
       const diaReg = fechaReg.getDate();
-
-      // REGLA DEL 16: Si se inscribió del 16 en adelante, su obligación financiera empieza el mes siguiente
-      if (diaReg >= 16) {
-        if (mesInicioDeuda === 11) { 
-          mesInicioDeuda = 0;
-          anoInicioDeuda++;
-        } else {
-          mesInicioDeuda++;
-        }
-      }
 
       // Calculamos cuántos meses han transcurrido desde su mes de inicio exigible hasta el mes ACTUAL
       const mesesTranscurridos = (anoActual - anoInicioDeuda) * 12 + (mesActual - mesInicioDeuda) + 1;
@@ -151,22 +151,28 @@ router.get('/dashboard', async (req, res) => {
         }
       }
     });
-
-    // ORDENAR: Los morosos que deben más meses (críticos) encabezan la lista
-    listaMorosos.sort((a, b) => b.mesesDeuda - a.mesesDeuda);
-
-    // Mapear los contadores al formato que espera el componente de React
+    // Mapear los contadores al formato que espera el componente de React asignando niveles reales
     const turnos_manana = Object.keys(turnosMañanaCount).map(h => ({ 
-      horario: h, 
-      nivel: h === '08:00 AM - 09:00 AM' ? 'Infantil / Iniciación' : h === '09:00 AM - 10:00 AM' ? 'Adultos / Master' : 'Libre / Práctica', 
+      horario: '09:00 AM - 10:00 AM', 
+      nivel: 'Módulo Único / General', 
       alumnos: turnosMañanaCount[h] 
     }));
 
-    const turnos_tarde = Object.keys(turnosTardeCount).map(h => ({ 
-      horario: h, 
-      nivel: h === '03:00 PM - 04:00 PM' ? 'Infantil / Adaptación' : h === '04:00 PM - 05:00 PM' ? 'Juvenil / Estilos' : 'Entrenamiento Avanzado', 
-      alumnos: turnosTardeCount[h] 
-    }));
+    const turnos_tarde = Object.keys(turnosTardeCount).map(h => {
+      let nivelAsignado = 'Iniciación / Adaptación';
+      if (h.includes('03:00 PM') || h.includes('04:00 PM')) nivelAsignado = 'Infantil / Estilos';
+      if (h.includes('05:00 PM') || h.includes('06:00 PM')) nivelAsignado = 'Juvenil y Adultos / Avanzado';
+
+      // Extraemos solo las horas para que la visual en el frontend quede limpia
+      const horarioLimpio = h.replace('Martes a Jueves: ', '');
+
+      return { 
+        horario: horarioLimpio, 
+        nivel: nivelAsignado, 
+        alumnos: turnosTardeCount[h] 
+      };
+    });
+
 
     // RETORNO: Agregamos de manera limpia las nuevas variables al objeto JSON de salida
     return res.status(200).json({
@@ -307,24 +313,149 @@ router.get('/alumnos-lista', async (req, res) => {
     return res.status(500).json({ error: 'Error al cargar la nómina de alumnos.' });
   }
 });
+// ENDPOINT: Consultar la tasa oficial BCV desde el servidor (Evita bloqueos CORS en elde VEX Wallet
 
-// ENDPOINT: Consultar la tasa oficial BCV desde el servidor (Evita bloqueos CORS en el Frontend)
+
+// ENDPOINT: Consultar la tasa oficial BCV desde el servidor
 router.get('/tasa-bcv', async (req, res) => {
+  // URLs de los servidores de cotizaciones
+  const apiVEX = 'https://vexwallet.co';
+  const apiRespaldo = 'https://dolarvzla.com';
+
+  // 🛡️ HEADERS COMPLETOS DE SIMULACIÓN DE NAVEGADOR
+  const configuracionHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+    'Connection': 'keep-alive'
+  };
+
+  // 🔌 AGENTE CONFIGURADO PARA IGNORAR ERRORES DE CERTIFICADO EN RED LOCAL (Evita bloqueos de TLS/SSL)
+  const https = require('https');
+  const agenteLocalSeguro = new https.Agent({ rejectUnauthorized: false });
+
   try {
-    const respuesta = await fetch('https://vercel.app');
-    if (respuesta.ok) {
+    // ---- INTENTO 1: VEX WALLET FX ----
+    const respuesta = await fetch(apiVEX, { 
+      headers: configuracionHeaders,
+      agent: agenteLocalSeguro 
+    });
+    
+    if (respuesta.status === 200) {
       const data = await respuesta.json();
-      const tasaCalculada = parseFloat(data?.monedas?.usd?.price);
+      const tasaCalculada = parseFloat(data?.price);
       if (tasaCalculada && tasaCalculada > 0) {
-        return res.status(200).json({ tasa: tasaCalculada });
+        console.log(`📊 Tasa BCV Sincronizada con éxito (VEX Wallet): ${tasaCalculada} VES`);
+        return res.status(200).json({ tasa: tasaCalculada, origen: 'vex_wallet_api' });
       }
     }
-    // Si la API externa falla, el servidor responde con la tasa de respaldo estable
-    return res.status(200).json({ tasa: 880.11 });
-  } catch (error) {
-    console.error("Error al consultar tasa en el backend, usando respaldo:", error);
-    return res.status(200).json({ tasa: 880.11 });
+    throw new Error(`Respuesta HTTP de VEX fallida. Estatus: ${respuesta.status}`);
+
+  } catch (errorVEX) {
+    console.warn(`⚠️ API VEX local bloqueada (${errorVEX.message}). Evaluando respaldo...`);
+
+    try {
+      // ---- INTENTO 2: CDN RESPALDO DOLARVZLA ----
+      const respuestaAlt = await fetch(apiRespaldo, { 
+        headers: configuracionHeaders,
+        agent: agenteLocalSeguro 
+      });
+      
+      if (respuestaAlt.status === 200) {
+        const dataAlt = await respuestaAlt.json();
+        const tasaAlt = parseFloat(dataAlt?.rates?.USD || dataAlt?.price || dataAlt?.bcv);
+        
+        if (tasaAlt && tasaAlt > 0) {
+          console.log(`📊 Tasa BCV Sincronizada (Respaldo DolarVzla): ${tasaAlt} VES`);
+          return res.status(200).json({ tasa: tasaAlt, origen: 'cdn_dolarvzla_backup' });
+        }
+      }
+      throw new Error(`Respuesta de respaldo fallida. Estatus: ${respuestaAlt.status}`);
+      
+    } catch (errorAlternativo) {
+      console.error("❌ Todas las consultas automatizadas colapsaron en la red local. Activando contingencia fija.");
+      
+      // ✅ SEGURO: Ajustamos el valor real base del BCV para evitar descuadres en los abonos en dólares
+      return res.status(200).json({ 
+        tasa: 881.88, 
+        origen: 'respaldo_estatico',
+        nota: "Sincronización en vivo no disponible por restricciones de red local."
+      });
+    }
   }
 });
+
+
+// PUT: Actualizar la ficha de un alumno por su ID
+router.put('/alumnos/:id', async (req, res) => {
+  const { id } = req.params; // Captura el ID de la URL
+  const {
+    nombre_alumno,
+    edad_alumno,
+    direccion,
+    es_menor_edad,
+    nombre_representante,
+    cedula_representante,
+    telefono_representante,
+    nivel,
+    horario_asignado
+  } = req.body;
+
+  // Validación básica de campos requeridos del lado del servidor
+  if (!nombre_alumno || !edad_alumno || !direccion || !cedula_representante || !telefono_representante || !nivel || !horario_asignado) {
+    return res.status(400).json({ 
+      error: 'Error: Faltan campos obligatorios para procesar la actualización.' 
+    });
+  }
+
+  try {
+    const queryText = `
+      UPDATE alumnos 
+      SET 
+        nombre_alumno = ?, 
+        edad_alumno = ?, 
+        direccion = ?, 
+        es_menor_edad = ?, 
+        nombre_representante = ?, 
+        cedula_representante = ?, 
+        telefono_representante = ?, 
+        nivel = ?, 
+        horario_asignado = ?
+      WHERE id = ?;
+    `;
+
+    const values = [
+      nombre_alumno,
+      parseInt(edad_alumno, 10),
+      direccion,
+      es_menor_edad ? 1 : 0, // Mapeo booleano nativo para MySQL
+      es_menor_edad ? nombre_representante : '', // Limpia el nombre del representante si ya es mayor de edad
+      cedula_representante,
+      telefono_representante,
+      nivel,
+      horario_asignado,
+      id // El ID va de último para morder el WHERE
+    ];
+
+    // Ejecuta la consulta en tu pool activo (XAMPP o Aiven de forma automática)
+    const [resultado] = await pool.query(queryText, values);
+
+    // Si por algún motivo el ID no existe en la base de datos
+    if (resultado.affectedRows === 0) {
+      return res.status(404).json({ error: 'El alumno especificado no existe.' });
+    }
+
+    return res.status(200).json({
+      mensaje: '¡Ficha de alumno actualizada con éxito en la base de datos!'
+    });
+
+  } catch (error) {
+    console.error('❌ Error al actualizar en MySQL:', error);
+    return res.status(500).json({ 
+      error: 'Error interno en el servidor al intentar modificar el registro.' 
+    });
+  }
+});
+
 
 module.exports = router;

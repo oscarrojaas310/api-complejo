@@ -316,69 +316,50 @@ router.get('/alumnos-lista', async (req, res) => {
 // ENDPOINT: Consultar la tasa oficial BCV desde el servidor (Evita bloqueos CORS en elde VEX Wallet
 
 
-// ENDPOINT: Consultar la tasa oficial BCV desde el servidor (LÓGICA DE PRODUCCIÓN)
+// ENDPOINT: Consultar la tasa oficial del dólar en vivo desde el servidor
 router.get('/tasa-bcv', async (req, res) => {
-  // 🌟 CONFIGURACIÓN DE ENDPOINTS DE DATOS REALES (Rutas que devuelven JSON, no HTML)
-  const apiVEX = 'https://vexwallet.co'; // Endpoint público de cotizaciones de VEX
-  const apiRespaldo = 'https://er-api.com';  // CDN global de respaldo de tipos de cambio
+  // 🌟 ENDPOINT ABIERTO DE PRODUCCIÓN: CDN global de tipos de cambio libre de bloqueos Cloudflare
+  const urlApiGlobal = 'https://er-api.com';
 
   const configuracionHeaders = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-    'Accept': 'application/json',
-    'Connection': 'keep-alive'
+    'Accept': 'application/json'
   };
 
   try {
-    // ---- INTENTO 1: ENDPOINT DE DATOS VEX ----
-    const respuesta = await fetch(apiVEX, { 
+    // ---- INTENTO 1: CONSULTA EN VIVO A LA API DE TASAS GLOBAL ----
+    const respuesta = await fetch(urlApiGlobal, { 
       headers: configuracionHeaders,
-      timeout: 4000
+      timeout: 5000 // Si tarda más de 5 segundos, aborta para no congelar el frontend
     });
     
     if (respuesta.status === 200) {
       const data = await respuesta.json();
-      // VEX estructura su JSON de tasas dentro de las propiedades del mercado P2P / BCV
-      const tasaCalculada = parseFloat(data?.bcv || data?.rate || data?.price);
+      // Captura el valor asignado para el Bolívar (VES) en el mercado internacional
+      const tasaCalculada = parseFloat(data?.rates?.VES);
       
       if (tasaCalculada && tasaCalculada > 0) {
-        console.log(`📊 Tasa BCV Sincronizada con éxito (VEX API): ${tasaCalculada} VES`);
-        return res.status(200).json({ tasa: tasaCalculada, origen: 'vex_wallet_api' });
+        console.log(`📊 Tasa Sincronizada con éxito en la nube (API Global): ${tasaCalculada} VES`);
+        return res.status(200).json({ 
+          tasa: tasaCalculada, 
+          origen: 'api_exchange_rate_live' 
+        });
       }
     }
-    throw new Error(`Respuesta HTTP de VEX no contiene JSON válido. Estatus: ${respuesta.status}`);
+    throw new Error(`Servidor de tasas saturado o respondió con estatus: ${respuesta.status}`);
 
-  } catch (errorVEX) {
-    console.warn(`⚠️ API VEX bloqueada o en mantenimiento (${errorVEX.message}). Evaluando respaldo global...`);
+  } catch (errorApi) {
+    // 🚨 PLAN DE CONTINGENCIA: Si la API global falla o el servidor experimenta microcortes de red
+    console.warn(`⚠️ Alerta de Red en Render (${errorApi.message}). Activando respaldo estático.`);
 
-    try {
-      // ---- INTENTO 2: CDN GLOBAL DE RESPALDO (ExchangeRate API) ----
-      const respuestaAlt = await fetch(apiRespaldo, { 
-        headers: configuracionHeaders,
-        timeout: 4000
-      });
-      
-      if (respuestaAlt.status === 200) {
-        const dataAlt = await respuestaAlt.json();
-        // Captura la tasa asignada para el Bolívar (VES) frente al dólar americano
-        const tasaAlt = parseFloat(dataAlt?.rates?.VES);
-        
-        if (tasaAlt && tasaAlt > 0) {
-          console.log(`📊 Tasa BCV Sincronizada (Respaldo API Global): ${tasaAlt} VES`);
-          return res.status(200).json({ tasa: tasaAlt, origen: 'global_rates_backup' });
-        }
-      }
-      throw new Error(`Servidor de respaldo global inalcanzable. Estatus: ${respuestaAlt.status}`);
-      
-    } catch (errorAlternativo) {
-      console.error("❌ Todas las consultas automatizadas colapsaron. Activando contingencia fija.");
-      
-      // ✅ SEGURO: Ajustamos la tasa base del BCV real de octubre 2026 para evitar descuadres comerciales
-      return res.status(200).json({ 
-        tasa: 49.50, // 🌟 Tasa promedio real y sana para el control de caja actual de la piscina
-        origen: 'respaldo_estatico',
-        nota: "Sincronización automatizada temporalmente fuera de servicio."
-      });
-    }
+    // ✅ SEGURO Y COHERENTE: Mantenemos el orden real de magnitud de su balance comercial
+    const tasaRespaldoReal = 880.00; 
+
+    return res.status(200).json({ 
+      tasa: tasaRespaldoReal, 
+      origen: 'contingencia_estatica_los_pinos',
+      nota: "Sincronización automatizada temporalmente fuera de servicio, usando base de respaldo."
+    });
   }
 });
 

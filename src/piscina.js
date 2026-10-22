@@ -599,23 +599,28 @@ router.get('/eventos/:id/pdf', async (req, res) => {
       doc.moveDown(1.5);
     }
 
-    // ⚖️ CLÁUSULAS LEGALES ESTÁNDAR COMPLEJO LOS PINOS
+
+     // ⚖️ CLÁUSULAS LEGALES ESTÁNDAR COMPLEJO LOS PINOS (REPARADO)
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('5. CLÁUSULAS DE SEGURIDAD Y RESPONSABILIDAD', { underline: true });
-    doc.moveDown(0.5);
-    doc.fontSize(9).font('Helvetica').fillColor('#475569');
+    doc.moveDown(0.4);
+    doc.fontSize(8.5).font('Helvetica').fillColor('#475569'); // Reducimos sutilmente a 8.5 para blindar el espacio
+    
     const clausulas = [
       "PRIMERA: El contratante se hace enteramente responsable por el comportamiento de sus invitados y el cuidado de las instalaciones.",
       "SEGUNDA: Queda estrictamente prohibido el uso de envases de vidrio dentro o en los bordes inmediatos del área de la piscina.",
       "TERCERA: El Complejo Los Pinos no se hace responsable por pérdidas de objetos personales durante la ejecución del evento.",
-      "CUARTA: Las horas extras que excedan el tiempo estipulado en la sección (2) tendrán un recargo de \$30 USD por hora fraccionada."
+      "CUARTA: Las horas extras que excedan el tiempo estipulado en la sección (2) tendrán un recargo de $30 USD por hora fraccionada."
     ];
-    clausulas.forEach(c => doc.text(clausulas, { width: 512, align: 'justify' }).moveDown(0.2));
     
-    // ✍️ BLOQUE DE FIRMAS DIGITALES DE RESGUARDO
-    doc.moveDown(4);
+    // ✅ REPARADO: Ahora imprime la variable "c" (la cláusula individual), no el arreglo completo
+    clausulas.forEach(c => doc.text(c, { width: 512, align: 'justify' }).moveDown(0.2));
+    
+    // ✍️ BLOQUE DE FIRMAS DIGITALES DE RESGUARDO (Márgenes Blindados de Página Única)
+    doc.moveDown(2.5); // Reducido de 4 a 2.5 para jalar las firmas arriba de forma segura
     const yFirma = doc.y;
-    doc.strokeColor('#94a3b8').lineWidth(0.5).moveTo(80, yFirma).lineTo(220, yFirma).stroke();
-    doc.strokeColor('#94a3b8').lineWidth(0.5).moveTo(340, yFirma).lineTo(480, yFirma).stroke();
+    
+    doc.strokeColor('#cbd5e1').lineWidth(0.5).moveTo(80, yFirma).lineTo(220, yFirma).stroke();
+    doc.strokeColor('#cbd5e1').lineWidth(0.5).moveTo(340, yFirma).lineTo(480, yFirma).stroke();
     
     doc.moveDown(0.2);
     doc.fontSize(9).font('Helvetica-Bold').fillColor('#334155');
@@ -624,7 +629,6 @@ router.get('/eventos/:id/pdf', async (req, res) => {
 
     // Finaliza el flujo y despacha el archivo binario
     doc.end();
-
   } catch (error) {
     console.error('❌ Error crítico en generación vectorial del PDF:', error);
     return res.status(500).send('Error interno del servidor al procesar el archivo imprimible.');

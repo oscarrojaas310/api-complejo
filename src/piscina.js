@@ -462,4 +462,175 @@ router.put('/alumnos/:id', async (req, res) => {
 });
 
 
+const PDFDocument = require('pdfkit');
+
+// 1. POST: Registrar una nueva reserva de alquiler de evento
+router.post('/eventos', async (req, res) => {
+  const {
+    responsable,
+    cedula_responsable,
+    telefono,
+    fecha,
+    hora_inicio,
+    hora_fin,
+    monto_dolares,
+    tasa_bcv,
+    monto_bolivares,
+    estatus,
+    observaciones
+  } = req.body;
+
+  if (!responsable || !cedula_responsable || !fecha || !hora_inicio || !hora_fin || !monto_dolares) {
+    return res.status(400).json({ error: 'Faltan campos obligatorios para agendar la reserva.' });
+  }
+
+  const queryInsert = `
+    INSERT INTO eventos_alquiler 
+    (responsable, cedula_responsable, telefono, fecha, hora_inicio, hora_fin, monto_dolares, tasa_bcv, monto_bolivares, estatus, observaciones)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+  `;
+
+  try {
+    const [resultado] = await pool.query(queryInsert, [
+      responsable,
+      cedula_responsable,
+      telefono || 'N/A',
+      fecha,
+      hora_inicio,
+      hora_fin,
+      parseFloat(monto_dolares),
+      parseFloat(tasa_bcv),
+      parseFloat(monto_bolivares),
+      estatus || 'Apartado',
+      observaciones || ''
+    ]);
+
+    return res.status(201).json({ 
+      mensaje: '¡Reserva de evento inyectada con éxito en Aiven!',
+      eventoId: resultado.insertId 
+    });
+  } catch (error) {
+    console.error('❌ Error al insertar evento en MySQL:', error);
+    return res.status(500).json({ error: 'Error interno al guardar la reserva.' });
+  }
+});
+
+// 2. GET: Obtener el cronograma de todos los alquileres agendados
+router.get('/eventos', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM eventos_alquiler ORDER BY fecha ASC, hora_inicio ASC');
+    return res.status(200).json(rows);
+  } catch (error) {
+    console.error('❌ Error al consultar cronograma:', error);
+    return res.status(500).json({ error: 'Error al cargar la agenda de eventos.' });
+  }
+});
+
+// 3. GET: Generar y descargar el contrato legal en formato PDF vectorizado
+router.get('/eventos/:id/pdf', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Buscamos el evento exacto en la base de datos de Aiven
+    const [rows] = await pool.query('SELECT * FROM eventos_alquiler WHERE id = ? LIMIT 1', [id]);
+    
+    if (rows.length === 0) {
+      return res.status(404).send('Error: El evento especificado no existe.');
+    }
+
+    const evento = rows[0];
+    const fechaFormateada = new Date(evento.fecha).toISOString().substring(0, 10);
+
+    // Configuración de cabeceras HTTP para forzar la descarga o apertura del PDF nativo
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename=Contrato_Alquiler_LosPinos_${id}.pdf`);
+
+    // Inicializamos el lienzo en blanco de PDFKit con márgenes corporativos
+    const doc = new PDFDocument({ margin: 50, size: 'LETTER' });
+    doc.pipe(res); // Canaliza el flujo de bytes directo a la respuesta HTTP de Render
+
+    // 📄 MEMBRETE INSTITUCIONAL DEL COMPLEJO
+    doc.fontSize(20).font('Helvetica-Bold').fillColor('#047857').text('COMPLEJO DEPORTIVO LOS PINOS', { align: 'center' });
+    doc.fontSize(9).font('Helvetica').fillColor('#475569').text('Control de Alquileres de Áreas Especiales y Piscina', { align: 'center' });
+    doc.text('Mérida, Venezuela · Soporte Corporativo', { align: 'center' });
+    
+    doc.moveDown(1);
+    doc.strokeColor('#cbd5e1').lineWidth(1).moveTo(50, doc.y).lineTo(562, doc.y).stroke(); // Línea divisoria elegante
+    doc.moveDown(1.5);
+
+    // 📌 NÚMERO DE CONTRATO Y FECHA DE REGISTRO
+    doc.fontSize(12).font('Helvetica-Bold').fillColor('#0f172a').text(`CONTRATO DE ARRENDAMIENTO DE ÁREA DE PISCINA N° 0026-${id}`, { align: 'left' });
+    doc.fontSize(10).font('Helvetica').fillColor('#475569').text(`Fecha de Emisión: ${new Date().toISOString().substring(0,10)}`, { align: 'left' });
+    doc.moveDown(1.5);
+
+    // 👤 FICHA TÉCNICA DEL CONTRATANTE
+    doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('1. PARTES CONTRATANTES Y RESPONSABLE', { underline: true });
+    doc.moveDown(0.5);
+    doc.fontSize(10).font('Helvetica').fillColor('#334155');
+    doc.text(`Nombre del Responsable:  ${evento.responsable}`);
+    doc.text(`Cédula de Identidad:          ${evento.cedula_responsable}`);
+    doc.text(`Teléfono de Contacto:       ${evento.telefono}`);
+    doc.text(`Área de Concesión:           Instalaciones de la Piscina Principal y Áreas Verdes Adyacentes`);
+    doc.moveDown(1.5);
+
+    // ⏱️ DATOS CRONOLÓGICOS DEL COMPROMISO
+    doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('2. VIGENCIA Y HORARIOS DEL COMPROMISO', { underline: true });
+    doc.moveDown(0.5);
+    doc.fontSize(10).font('Helvetica').fillColor('#334155');
+    doc.text(`Fecha Agendada:     ${fechaFormateada}`);
+    doc.text(`Hora de Entrada:      ${evento.hora_inicio.substring(0, 5)} (Hora exacta de entrega de instalaciones)`);
+    doc.text(`Hora de Salida:       ${evento.hora_fin.substring(0, 5)} (Hora de desalojo definitivo)`);
+    doc.moveDown(1.5);
+
+    // 💵 CLÁUSULAS FINANCIERAS BIMONETARIAS
+    doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('3. CONDICIONES FINANCIERAS Y ABONOS', { underline: true });
+    doc.moveDown(0.5);
+    doc.text(`Canon de Arrendamiento:       $${parseFloat(evento.monto_dolares).toFixed(2)} USD`);
+    doc.text(`Tasa Cambiaria BCV:               ${parseFloat(evento.tasa_bcv).toFixed(2)} VES por 1 USD`);
+    doc.text(`Total en Moneda Nacional:    Bs. ${parseFloat(evento.monto_bolivares).toFixed(2)} VES`);
+    doc.text(`Estatus del Pago:                     ${evento.estatus === 'Liquidado' ? '🟢 LIQUIDADO / CANCELADO COMPLETAMENTE' : '🔴 APARTADO (Requiere completar saldo al ingresar)'}`);
+    doc.moveDown(1.5);
+
+    // 📝 SECCIÓN DE OBSERVACIONES PARTICULARES
+    if (evento.observaciones) {
+      doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('4. OBSERVACIONES Y DETALLES DEL ALQUILER', { underline: true });
+      doc.moveDown(0.5);
+      doc.fontSize(10).font('Helvetica-Oblique').fillColor('#475569').text(`"${evento.observaciones}"`, { width: 512, align: 'justify' });
+      doc.moveDown(1.5);
+    }
+
+    // ⚖️ CLÁUSULAS LEGALES ESTÁNDAR COMPLEJO LOS PINOS
+    doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('5. CLÁUSULAS DE SEGURIDAD Y RESPONSABILIDAD', { underline: true });
+    doc.moveDown(0.5);
+    doc.fontSize(9).font('Helvetica').fillColor('#475569');
+    const clausulas = [
+      "PRIMERA: El contratante se hace enteramente responsable por el comportamiento de sus invitados y el cuidado de las instalaciones.",
+      "SEGUNDA: Queda estrictamente prohibido el uso de envases de vidrio dentro o en los bordes inmediatos del área de la piscina.",
+      "TERCERA: El Complejo Los Pinos no se hace responsable por pérdidas de objetos personales durante la ejecución del evento.",
+      "CUARTA: Las horas extras que excedan el tiempo estipulado en la sección (2) tendrán un recargo de \$30 USD por hora fraccionada."
+    ];
+    clausulas.forEach(c => doc.text(clausulas, { width: 512, align: 'justify' }).moveDown(0.2));
+    
+    // ✍️ BLOQUE DE FIRMAS DIGITALES DE RESGUARDO
+    doc.moveDown(4);
+    const yFirma = doc.y;
+    doc.strokeColor('#94a3b8').lineWidth(0.5).moveTo(80, yFirma).lineTo(220, yFirma).stroke();
+    doc.strokeColor('#94a3b8').lineWidth(0.5).moveTo(340, yFirma).lineTo(480, yFirma).stroke();
+    
+    doc.moveDown(0.2);
+    doc.fontSize(9).font('Helvetica-Bold').fillColor('#334155');
+    doc.text('Por el Complejo Los Pinos', 80, yFirma + 5, { width: 140, align: 'center' });
+    doc.text('Firma del Responsable', 340, yFirma + 5, { width: 140, align: 'center' });
+
+    // Finaliza el flujo y despacha el archivo binario
+    doc.end();
+
+  } catch (error) {
+    console.error('❌ Error crítico en generación vectorial del PDF:', error);
+    return res.status(500).send('Error interno del servidor al procesar el archivo imprimible.');
+  }
+});
+
+
+
 module.exports = router;

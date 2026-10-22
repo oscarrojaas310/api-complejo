@@ -313,19 +313,18 @@ router.get('/alumnos-lista', async (req, res) => {
     return res.status(500).json({ error: 'Error al cargar la nómina de alumnos.' });
   }
 });
-
-// ENDPOINT: Consultar la tasa oficial BCV mediante la API de Cotizave
+// ENDPOINT: Consultar la tasa oficial BCV e impactar la tabla de ajustes automáticamente
 router.get('/tasa-bcv', async (req, res) => {
   const urlCotizave = 'https://api.cotizave.com/v1/fx/rates/reference';
 
-  // 🌟 REQUISITO MANDATORIO: Aquí inyectas los headers que exige la documentación
   const configuracionHeaders = {
-    'X-API-Key': 'ctz_live_0RkBOtMcDmSZQquuI2t2mNuhGAZy0BbSCtN8dY', // Debes crear una cuenta en cotizave.com para obtener tu clave ctz_live...
+    'X-API-Key': 'ctz_live_0RkBOtMcDmSZQquuI2t2mNuhGAZy0BbSCtN8dY',
     'Accept': 'application/json',
     'User-Agent': 'AdminPiscinaLosPinos/1.0'
   };
 
   try {
+    // ---- INTENTO 1: CONSULTAR API EN VIVO ----
     const respuesta = await fetch(urlCotizave, { 
       method: 'GET',
       headers: configuracionHeaders,
@@ -334,31 +333,59 @@ router.get('/tasa-bcv', async (req, res) => {
     
     if (respuesta.status === 200) {
       const data = await respuesta.json();
-      
-      // 🌟 MAPEO SEGÚN DOCUMENTACIÓN: Cotizave entrega la tasa en la propiedad "mid"
       const tasaCalculada = parseFloat(data?.mid);
       
       if (tasaCalculada && tasaCalculada > 0) {
-        console.log(`📊 Tasa Sincronizada con éxito (API Cotizave): ${tasaCalculada} VES`);
+        console.log(`📊 Tasa extraída de Cotizave: ${tasaCalculada} VES. Actualizando MySQL...`);
+        
+        // 🚀 INSERCIÓN AUTOMÁTICA EN TU NUEVA TABLA:
+        // Si la clave 'tasa_bcv_actual' ya existe, actualiza su valor; si no, la crea de cero.
+        const queryUpsert = `
+          INSERT INTO ajustes_sistema (clave, valor) 
+          VALUES ('tasa_bcv_actual', ?) 
+          ON DUPLICATE KEY UPDATE valor = ?, actualizado_el = CURRENT_TIMESTAMP;
+        `;
+        
+        const stringTasa = tasaCalculada.toFixed(2);
+        await pool.query(queryUpsert, [stringTasa, stringTasa]);
+
         return res.status(200).json({ 
           tasa: tasaCalculada, 
           origen: 'cotizave_api_live',
+          status: 'guardado_en_base_de_datos',
           actualizado_el: data?.updated_at
         });
       }
     }
-    throw new Error(`Cotizave denegó el acceso. Código: ${respuesta.status}`);
+    throw new Error(`Cotizave denegó el acceso o devolvió estatus: ${respuesta.status}`);
 
   } catch (error) {
-    console.warn(`⚠️ Caída en Cotizave: ${error.message}. Activando plan de contingencia.`);
+    console.warn(`⚠️ Caída de red o API bloqueada (${error.message}). Activando contingencia de base de datos local.`);
     
-    // Respaldo verídico e infalible sobre tus 883.39 VES reales para tu caja de la piscina
-    const tasaRespaldoReal = 883.39; 
+    try {
+      // 🛡️ PLAN DE CONTINGENCIA INTELIGENTE:
+      // Si no hay internet, consultamos la última tasa real que tú mismo guardaste en TablePlus
+      const [registro] = await pool.query("SELECT valor FROM ajustes_sistema WHERE clave = 'tasa_bcv_actual' LIMIT 1");
+      
+      if (registro.length > 0) {
+        const tasaHistoricaLocal = parseFloat(registro[0].valor);
+        console.log(`💾 Contingencia Exitosa: Usando tasa de tu tabla ajustes_sistema: ${tasaHistoricaLocal} VES`);
+        return res.status(200).json({ 
+          tasa: tasaHistoricaLocal, 
+          origen: 'ajustes_sistema_mysql_local',
+          nota: "Sin internet. Utilizando la última tasa resguardada en la base de datos."
+        });
+      }
+    } catch (errorSQL) {
+      console.error("❌ La tabla ajustes_sistema no existe o está caída:", errorSQL.message);
+    }
 
+    // 🚨 PLAN C (El último recurso extremo si todo lo anterior colapsa):
+    const tasaRespaldoEmergencia = 884.75; 
     return res.status(200).json({ 
-      tasa: tasaRespaldoReal, 
-      origen: 'contingencia_estatica_los_pinos',
-      nota: "Servidor automatizado en mantenimiento, usando base referencial."
+      tasa: tasaRespaldoEmergencia, 
+      origen: 'emergencia_codigo_duro',
+      nota: "Fallo total de red y base de datos."
     });
   }
 });

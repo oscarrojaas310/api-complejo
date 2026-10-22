@@ -629,6 +629,7 @@ router.get('/eventos/:id/pdf', async (req, res) => {
 
     // Finaliza el flujo y despacha el archivo binario
     doc.end();
+    
   } catch (error) {
     console.error('❌ Error crítico en generación vectorial del PDF:', error);
     return res.status(500).send('Error interno del servidor al procesar el archivo imprimible.');

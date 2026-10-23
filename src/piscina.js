@@ -723,12 +723,13 @@ router.get('/asistencia-previa', async (req, res) => {
   }
 });
 
-// 3. ENDPOINT: Resumen e historial semanal con porcentaje de efectividad
+// 3. ENDPOINT: Resumen e historial semanal con inyección de ISO Date para auditoría
 router.get('/asistencia-resumen-semanal', async (req, res) => {
   try {
     const querySQL = `
       SELECT 
         horario,
+        fecha AS fecha_iso, -- 🌟 AÑADIDO: Entrega el formato YYYY-MM-DD para el fetch del detalle
         DATE_FORMAT(fecha, '%d/%m/%Y') AS fecha_corta,
         SUM(CASE WHEN asistio = 1 THEN 1 ELSE 0 END) AS presentes,
         SUM(CASE WHEN asistio = 0 THEN 1 ELSE 0 END) AS ausentes
@@ -740,8 +741,29 @@ router.get('/asistencia-resumen-semanal', async (req, res) => {
     const [rows] = await pool.query(querySQL);
     return res.status(200).json(rows);
   } catch (error) {
+    console.error('Error al generar resumen semanal:', error);
     return res.status(500).json({ error: error.message });
   }
 });
+
+
+// 4. ENDPOINT: Obtener la nómina detallada de un día histórico para auditar
+router.get('/asistencia-detalle', async (req, res) => {
+  const { fecha, horario } = req.query;
+  try {
+    const querySQL = `
+      SELECT a.nombre_alumno, ast.asistio 
+      FROM asistencias ast
+      INNER JOIN alumnos a ON ast.alumno_id = a.id
+      WHERE ast.fecha = ? AND ast.horario = ?
+      ORDER BY a.nombre_alumno ASC
+    `;
+    const [rows] = await pool.query(querySQL, [fecha, horario]);
+    return res.status(200).json(rows);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 
 module.exports = router;

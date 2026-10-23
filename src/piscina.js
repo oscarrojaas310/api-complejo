@@ -701,5 +701,47 @@ router.post('/asistencia-diaria', async (req, res) => {
   }
 });
 
+router.get('/asistencias-completadas', async (req, res) => {
+  const { fecha } = req.query;
+  try {
+    const [rows] = await pool.query('SELECT DISTINCT horario FROM asistencias WHERE fecha = ?', [fecha]);
+    const completados = rows.map(r => r.horario);
+    return res.status(200).json(completados);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// 2. ENDPOINT: Precargar datos si ya se guardó la asistencia de ese día para edición en caliente
+router.get('/asistencia-previa', async (req, res) => {
+  const { fecha, horario } = req.query;
+  try {
+    const [rows] = await pool.query('SELECT alumno_id, asistio FROM asistencias WHERE fecha = ? AND horario = ?', [fecha, horario]);
+    return res.status(200).json(rows);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// 3. ENDPOINT: Resumen e historial semanal con porcentaje de efectividad
+router.get('/asistencia-resumen-semanal', async (req, res) => {
+  try {
+    const querySQL = `
+      SELECT 
+        horario,
+        DATE_FORMAT(fecha, '%d/%m/%Y') AS fecha_corta,
+        SUM(CASE WHEN asistio = 1 THEN 1 ELSE 0 END) AS presentes,
+        SUM(CASE WHEN asistio = 0 THEN 1 ELSE 0 END) AS ausentes
+      FROM asistencias
+      WHERE YEARWEEK(fecha, 1) = YEARWEEK(CURDATE(), 1)
+      GROUP BY fecha, horario
+      ORDER BY fecha DESC, horario ASC
+    `;
+    const [rows] = await pool.query(querySQL);
+    return res.status(200).json(rows);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
 
 module.exports = router;

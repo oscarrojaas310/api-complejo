@@ -550,7 +550,7 @@ router.get('/eventos/:id/pdf', async (req, res) => {
     doc.pipe(res); // Canaliza el flujo de bytes directo a la respuesta HTTP de Render
 
     // 📄 MEMBRETE INSTITUCIONAL DEL COMPLEJO
-    doc.fontSize(20).font('Helvetica-Bold').fillColor('#047857').text('COMPLEJO DEPORTIVO LOS PINOS', { align: 'center' });
+    doc.fontSize(20).font('Helvetica-Bold').fillColor('#047857').text('COMPLEJO DEPORTIVO RECREACIONAL LOS PINOS', { align: 'center' });
     doc.fontSize(9).font('Helvetica').fillColor('#475569').text('Control de Alquileres de Áreas Especiales y Piscina', { align: 'center' });
     doc.text('Mérida, Venezuela · Soporte Corporativo', { align: 'center' });
     

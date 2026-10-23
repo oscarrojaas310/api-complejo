@@ -636,6 +636,70 @@ router.get('/eventos/:id/pdf', async (req, res) => {
   }
 });
 
+// ENDPOINT: Registrar la asistencia diaria de todo un turno en bloque masivo
+router.post('/asistencia-diaria', async (req, res) => {
+  const { fecha, horario, bloque, registros } = req.body;
+
+  // Validación estricta de estructura
+  if (!fecha || !horario || !bloque || !registros || !Array.isArray(registros)) {
+    return res.status(400).json({ error: 'Estructura de reporte incompleta o inválida.' });
+  }
+
+  // Obtenemos una conexión limpia del pool para manejar la transacción
+  const conexion = await pool.getConnection();
+
+  try {
+    // 🚀 Arrancamos la transacción de seguridad masiva
+    await conexion.beginTransaction();
+
+    console.log(`⏳ Procesando asistencia para el turno ${horario} del día ${fecha}...`);
+
+    // Preparamos la consulta con ON DUPLICATE KEY UPDATE. 
+    // Si el entrenador vuelve a pasar asistencia del mismo turno para corregir algo,
+    // MySQL actualizará el estado (Presente/Ausente) en lugar de dar error.
+    const querySQL = `
+      INSERT INTO asistencias (alumno_id, fecha, horario, bloque, asistio) 
+      VALUES (?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE 
+        asistio = VALUES(asistio),
+        horario = VALUES(horario),
+        bloque = VALUES(bloque)
+    `;
+
+    // Ejecutamos cada inserción de forma consecutiva dentro de la misma transacción
+    for (const reg of registros) {
+      await conexion.query(querySQL, [
+        parseInt(reg.alumno_id, 10),
+        fecha,
+        horario,
+        bloque,
+        parseInt(reg.asistio, 10)
+      ]);
+    }
+
+    // 💾 Si todo salió bien, asentamos los cambios definitivamente en Aiven / XAMPP
+    await conexion.commit();
+    console.log(`✅ ¡Asistencia guardada con éxito! Total registros asentados: ${registros.length}`);
+    
+    return res.status(200).json({ 
+      mensaje: 'Reporte de asistencia procesado y guardado correctamente.',
+      registrados: registros.length 
+    });
+
+  } catch (error) {
+    // 🛡️ Si algo colapsó o falló la red, revertimos todo para no corromper la tabla
+    await conexion.rollback();
+    console.error('❌ Error crítico en transacción de asistencia:', error);
+    
+    return res.status(500).json({ 
+      error: 'Error interno al procesar el reporte de asistencia en la base de datos.',
+      detalle: error.message 
+    });
+  } finally {
+    // 🔌 Devolvemos la conexión al pool de inmediato para que quede libre para otros usuarios
+    conexion.release();
+  }
+});
 
 
 module.exports = router;

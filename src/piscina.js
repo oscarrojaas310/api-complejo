@@ -729,13 +729,14 @@ router.get('/asistencia-resumen-semanal', async (req, res) => {
     const querySQL = `
       SELECT 
         horario,
-        fecha AS fecha_iso, -- 🌟 AÑADIDO: Entrega el formato YYYY-MM-DD para el fetch del detalle
+        fecha AS fecha_iso, -- ✅ Entrega el formato original YYYY-MM-DD
         DATE_FORMAT(fecha, '%d/%m/%Y') AS fecha_corta,
         SUM(CASE WHEN asistio = 1 THEN 1 ELSE 0 END) AS presentes,
         SUM(CASE WHEN asistio = 0 THEN 1 ELSE 0 END) AS ausentes
       FROM asistencias
       WHERE YEARWEEK(fecha, 1) = YEARWEEK(CURDATE(), 1)
-      GROUP BY fecha, horario
+      -- ✅ CORREGIDO: Agrupamos exactamente por las mismas columnas proyectadas para evitar el error de MySQL
+      GROUP BY horario, fecha
       ORDER BY fecha DESC, horario ASC
     `;
     const [rows] = await pool.query(querySQL);
@@ -746,10 +747,14 @@ router.get('/asistencia-resumen-semanal', async (req, res) => {
   }
 });
 
-
 // 4. ENDPOINT: Obtener la nómina detallada de un día histórico para auditar
 router.get('/asistencia-detalle', async (req, res) => {
   const { fecha, horario } = req.query;
+  
+  if (!fecha || !horario) {
+    return res.status(400).json({ error: 'Los parámetros fecha y horario son obligatorios.' });
+  }
+
   try {
     const querySQL = `
       SELECT a.nombre_alumno, ast.asistio 
@@ -761,9 +766,9 @@ router.get('/asistencia-detalle', async (req, res) => {
     const [rows] = await pool.query(querySQL, [fecha, horario]);
     return res.status(200).json(rows);
   } catch (error) {
+    console.error('Error en asistencia-detalle:', error);
     return res.status(500).json({ error: error.message });
   }
 });
-
 
 module.exports = router;

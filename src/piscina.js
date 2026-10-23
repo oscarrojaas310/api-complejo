@@ -588,7 +588,7 @@ router.get('/eventos/:id/pdf', async (req, res) => {
     doc.text(`Canon de Arrendamiento:       $${parseFloat(evento.monto_dolares).toFixed(2)} USD`);
     doc.text(`Tasa Cambiaria BCV:               ${parseFloat(evento.tasa_bcv).toFixed(2)} VES por 1 USD`);
     doc.text(`Total en Moneda Nacional:    Bs. ${parseFloat(evento.monto_bolivares).toFixed(2)} VES`);
-    doc.text(`Estatus del Pago:                     ${evento.estatus === 'Liquidado' ? '🟢 LIQUIDADO / CANCELADO COMPLETAMENTE' : '🔴 APARTADO (Requiere completar saldo al ingresar)'}`);
+    doc.text(`Estatus del Pago:                     ${evento.estatus === 'Liquidado' ? ' LIQUIDADO / CANCELADO COMPLETAMENTE' : 'APARTADO (Requiere completar saldo al ingresar)'}`);
     doc.moveDown(1.5);
 
     // 📝 SECCIÓN DE OBSERVACIONES PARTICULARES
@@ -616,7 +616,7 @@ router.get('/eventos/:id/pdf', async (req, res) => {
     clausulas.forEach(c => doc.text(c, { width: 512, align: 'justify' }).moveDown(0.2));
     
     // ✍️ BLOQUE DE FIRMAS DIGITALES DE RESGUARDO (Márgenes Blindados de Página Única)
-    doc.moveDown(2.5); // Reducido de 4 a 2.5 para jalar las firmas arriba de forma segura
+    doc.moveDown(3.5); // Reducido de 4 a 2.5 para jalar las firmas arriba de forma segura
     const yFirma = doc.y;
     
     doc.strokeColor('#cbd5e1').lineWidth(0.5).moveTo(80, yFirma).lineTo(220, yFirma).stroke();

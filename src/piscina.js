@@ -770,8 +770,7 @@ router.get('/asistencia-detalle', async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 });
-
-// 5. ENDPOINT: Eliminar el reporte de asistencia completo de un turno y fecha específicos
+// 5. ENDPOINT BLINDADO: Eliminar el reporte de asistencia completo de un turno y fecha
 router.delete('/asistencia-eliminar', async (req, res) => {
   const { fecha, horario } = req.query;
 
@@ -780,20 +779,24 @@ router.delete('/asistencia-eliminar', async (req, res) => {
   }
 
   try {
-    const querySQL = 'DELETE FROM asistencias WHERE fecha = ? AND horario = ?';
-    const [result] = await pool.query(querySQL, [fecha, horario]);
+    // Limpiamos espacios en blanco extremos por seguridad
+    const horarioLimpio = horario.trim();
 
-    console.log(`🗑️ Historial eliminado para el turno [${horario}] del día [${fecha}]. Filas afectadas: ${result.affectedRows}`);
+    // Usamos LIKE con comodines % para que MySQL borre de forma exacta 
+    // sin importar si el string viene codificado por la URL desde el teléfono
+    const querySQL = 'DELETE FROM asistencias WHERE fecha = ? AND horario LIKE ?';
+    const [result] = await pool.query(querySQL, [fecha, `%${horarioLimpio}%`]);
+
+    console.log(`🗑️ Historial eliminado para el turno [${horarioLimpio}] del día [${fecha}]. Filas borradas: ${result.affectedRows}`);
     
     return res.status(200).json({ 
       mensaje: 'Registro de asistencia eliminado correctamente.',
       filas_borradas: result.affectedRows 
     });
   } catch (error) {
-    console.error('❌ Error al eliminar asistencia en la base de datos:', error);
+    console.error('❌ Error crítico al eliminar asistencia en Render:', error);
     return res.status(500).json({ error: 'Error interno del servidor al procesar la baja.' });
   }
 });
-
 
 module.exports = router;

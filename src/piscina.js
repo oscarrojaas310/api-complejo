@@ -723,26 +723,26 @@ router.get('/asistencia-previa', async (req, res) => {
   }
 });
 
-// 3. ENDPOINT: Resumen e historial semanal con inyección de ISO Date para auditoría
+// 3. ENDPOINT: Libro de Actas Continuo de Asistencias (Historial completo controlado por el Administrador)
 router.get('/asistencia-resumen-semanal', async (req, res) => {
   try {
     const querySQL = `
       SELECT 
         horario,
-        fecha AS fecha_iso, -- ✅ Entrega el formato original YYYY-MM-DD
+        fecha AS fecha_iso, -- Entrega el formato original YYYY-MM-DD
         DATE_FORMAT(fecha, '%d/%m/%Y') AS fecha_corta,
         SUM(CASE WHEN asistio = 1 THEN 1 ELSE 0 END) AS presentes,
         SUM(CASE WHEN asistio = 0 THEN 1 ELSE 0 END) AS ausentes
       FROM asistencias
-      WHERE YEARWEEK(fecha, 1) = YEARWEEK(CURDATE(), 1)
-      -- ✅ CORREGIDO: Agrupamos exactamente por las mismas columnas proyectadas para evitar el error de MySQL
+      -- 🔍 MODIFICADO: Eliminamos la regla "WHERE YEARWEEK..." para mostrar todo el historial acumulado
       GROUP BY horario, fecha
       ORDER BY fecha DESC, horario ASC
+      LIMIT 100 -- 🛡️ BLINDAJE: Muestra los últimos 100 turnos pasados para no saturar la memoria del teléfono
     `;
     const [rows] = await pool.query(querySQL);
     return res.status(200).json(rows);
   } catch (error) {
-    console.error('Error al generar resumen semanal:', error);
+    console.error('Error al generar el historial continuo de asistencia:', error);
     return res.status(500).json({ error: error.message });
   }
 });
@@ -770,5 +770,30 @@ router.get('/asistencia-detalle', async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 });
+
+// 5. ENDPOINT: Eliminar el reporte de asistencia completo de un turno y fecha específicos
+router.delete('/asistencia-eliminar', async (req, res) => {
+  const { fecha, horario } = req.query;
+
+  if (!fecha || !horario) {
+    return res.status(400).json({ error: 'Los parámetros fecha y horario son obligatorios.' });
+  }
+
+  try {
+    const querySQL = 'DELETE FROM asistencias WHERE fecha = ? AND horario = ?';
+    const [result] = await pool.query(querySQL, [fecha, horario]);
+
+    console.log(`🗑️ Historial eliminado para el turno [${horario}] del día [${fecha}]. Filas afectadas: ${result.affectedRows}`);
+    
+    return res.status(200).json({ 
+      mensaje: 'Registro de asistencia eliminado correctamente.',
+      filas_borradas: result.affectedRows 
+    });
+  } catch (error) {
+    console.error('❌ Error al eliminar asistencia en la base de datos:', error);
+    return res.status(500).json({ error: 'Error interno del servidor al procesar la baja.' });
+  }
+});
+
 
 module.exports = router;

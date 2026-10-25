@@ -193,6 +193,131 @@ router.get('/dashboard', async (req, res) => {
     return res.status(500).json({ error: 'Error al procesar el reporte de caja.' });
   }
 });
+
+router.get('/reporte-general', async (req, res) => {
+  const PDFDocument = require('pdfkit'); // Asegura que esté importado al inicio o aquí
+  
+  try {
+    // 1. Buscamos todos los pagos cruzando datos con la nómina de atletas de Aiven MySQL
+    const querySQL = `
+      SELECT 
+        p.*, 
+        a.nombre_alumno, 
+        a.cedula_representante 
+      FROM pagos p
+      INNER JOIN alumnos a ON p.alumno_id = a.id
+      ORDER BY p.fecha_registro DESC
+    `;
+    
+    const [rows] = await pool.query(querySQL);
+    
+    // 2. Calcular Totales Consolidados para el bloque financiero del PDF
+    let totalDolares = 0;
+    let totalBolivares = 0;
+    const totalTransacciones = rows.length;
+
+    rows.forEach(pago => {
+      totalDolares += parseFloat(pago.monto_dolares || 0);
+      totalBolivares += parseFloat(pago.monto_bolivares || 0);
+    });
+
+    // 3. Configuración de cabeceras HTTP para apertura nativa en el navegador
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename=Balance_General_Caja_Piscina.pdf');
+
+    // Inicializamos el lienzo en blanco en formato horizontal (landscape)
+    const doc = new PDFDocument({ 
+      size: 'LETTER', 
+      layout: 'landscape', 
+      margin: 40 
+    });
+    
+    // Canaliza el flujo de bytes directo a la respuesta HTTP de Render
+    doc.pipe(res); 
+
+    // Banner Principal
+    doc.rect(40, 40, 712, 50).fill('#0f172a');
+    doc.fillColor('#ffffff').fontSize(14).font('Helvetica-Bold').text('REPORTE GENERAL DE INGRESOS Y AUDITORÍA DE CAJA', 55, 50);
+    doc.fontSize(8).font('Helvetica-Oblique').text(`Consolidado del Sistema Financiero | Generado: ${new Date().toLocaleString()}`, 55, 68);
+
+    // --- Tarjetas Informativas ---
+    let boxWidth = 224;
+    let boxY = 105;
+
+    doc.rect(40, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
+    doc.fillColor('#475569').fontSize(7).font('Helvetica-Bold').text('TOTAL DIVISAS EN EFECTIVO (USD)', 50, boxY + 10);
+    doc.fillColor('#0f172a').fontSize(14).font('Helvetica-Bold').text(`$ ${totalDolares.toFixed(2)}`, 50, boxY + 22);
+
+    doc.rect(40 + boxWidth + 20, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
+    doc.fillColor('#059669').fontSize(7).font('Helvetica-Bold').text('TOTAL RECAUDADO EN BOLÍVARES (VES)', 40 + boxWidth + 30, boxY + 10);
+    doc.fillColor('#047857').fontSize(14).font('Helvetica-Bold').text(`${totalBolivares.toFixed(2)} VES`, 40 + boxWidth + 30, boxY + 22);
+
+    doc.rect(40 + (boxWidth * 2) + 40, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
+    doc.fillColor('#475569').fontSize(7).font('Helvetica-Bold').text('COMPROBANTES TOTALES EMITIDOS', 40 + (boxWidth * 2) + 50, boxY + 10);
+    doc.fillColor('#0f172a').fontSize(14).font('Helvetica-Bold').text(`${totalTransacciones} Transacciones`, 40 + (boxWidth * 2) + 50, boxY + 22);
+
+    // --- Tabla General ---
+    let y = 170;
+    doc.fillColor('#1e293b').fontSize(10).font('Helvetica-Bold').text('DETALLE INDIVIDUAL DE MOVIMIENTOS A CAJA', 40, y);
+    y += 15;
+
+    doc.rect(40, y, 712, 20).fill('#e2e8f0');
+    doc.fillColor('#334155').font('Helvetica-Bold').fontSize(8);
+    doc.text('ID Recibo', 45, y + 6, { width: 45 });
+    doc.text('Atleta / Alumno', 100, y + 6, { width: 140 });
+    doc.text('Cédula Rep.', 250, y + 6, { width: 70 });
+    doc.text('Mes Cobro', 330, y + 6, { width: 65 });
+    doc.text('Fecha Pago', 405, y + 6, { width: 65 });
+    doc.text('Método', 480, y + 6, { width: 60 });
+    doc.text('Monto ($)', 550, y + 6, { width: 55, align: 'right' });
+    doc.text('Monto (Bs.)', 615, y + 6, { width: 75, align: 'right' });
+    doc.text('Origen', 700, y + 6, { width: 45, align: 'center' });
+    
+    y += 20;
+
+    doc.font('Helvetica').fontSize(8).fillColor('#0f172a');
+    
+    rows.forEach((pago, index) => {
+      if (y > 510) { 
+        doc.addPage({ size: 'LETTER', layout: 'landscape', margin: 40 }); 
+        y = 40; 
+      }
+
+      if (index % 2 === 0) {
+        doc.rect(40, y, 712, 18).fill('#f8fafc');
+        doc.fillColor('#0f172a');
+      }
+
+      const fechaFormateada = new Date(pago.fecha_registro).toLocaleDateString();
+      const procedencia = pago.guardado_offline ? 'OFFLINE' : 'RED';
+
+      doc.text(`#${pago.id}`, 45, y + 5, { width: 45 });
+      doc.text(pago.nombre_alumno, 100, y + 5, { width: 140, ellipsis: true });
+      doc.text(pago.cedula_representante || 'N/P', 250, y + 5, { width: 70 });
+      doc.text(pago.mes_pagado, 330, y + 5, { width: 65 });
+      doc.text(fechaFormateada, 405, y + 5, { width: 65 });
+      doc.text(pago.metodo_pago.toUpperCase(), 480, y + 5, { width: 60 });
+      doc.text(`$${parseFloat(pago.monto_dolares || 0).toFixed(2)}`, 550, y + 5, { width: 55, align: 'right' });
+      doc.text(`${parseFloat(pago.monto_bolivares || 0).toFixed(2)}`, 615, y + 5, { width: 75, align: 'right' });
+      doc.text(procedencia, 700, y + 5, { width: 45, align: 'center' });
+
+      doc.strokeColor('#f1f5f9').lineWidth(0.5).moveTo(40, y + 18).lineTo(752, y + 18).stroke();
+      y += 18;
+    });
+
+    doc.strokeColor('#0f172a').lineWidth(1).moveTo(40, 560).lineTo(752, 560).stroke();
+    doc.fillColor('#94a3b8').fontSize(7).text('Reporte de Auditoría Central Interno - Desarrollado bajo especificaciones de resiliencia Offline-First.', 40, 568);
+
+    doc.end();
+
+  } catch (error) {
+    console.error('❌ Error crítico en generación del PDF:', error);
+    return res.status(500).send('Error interno del servidor al procesar el archivo imprimible.');
+  }
+});
+
+
+
 // POST: Registrar pagos de mensualidades de forma individual o masiva (LÓGICA BLINDADA Y CORREGIDA)
 router.post('/pagos', async (req, res) => {
   const { 
@@ -805,145 +930,4 @@ router.delete('/asistencia-eliminar', async (req, res) => {
     });
   }
 });
-
-// 3. GET: Generar y descargar el balance general de caja en formato PDF consolidado
-router.get('/reporte-general', async (req, res) => {
-  try {
-    // 1. Buscamos todos los pagos cruzando datos con la nómina de atletas de Aiven
-    // Traemos el nombre del alumno para mostrar en la tabla unificada del PDF
-    const querySQL = `
-      SELECT 
-        p.*, 
-        a.nombre_alumno, 
-        a.cedula_representante 
-      FROM pagos p
-      INNER JOIN alumnos a ON p.alumno_id = a.id
-      ORDER BY p.fecha_registro DESC
-    `;
-    
-    const [rows] = await pool.query(querySQL);
-    
-    // 2. Calcular Totales Consolidados para el bloque financiero del PDF
-    let totalDolares = 0;
-    let totalBolivares = 0;
-    const totalTransacciones = rows.length;
-
-    rows.forEach(pago => {
-      totalDolares += parseFloat(pago.monto_dolares || 0);
-      totalBolivares += parseFloat(pago.monto_bolivares || 0);
-    });
-
-    // 3. Configuración idéntica de cabeceras HTTP para apertura nativa en el navegador
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline; filename=Balance_General_Caja_Piscina.pdf');
-
-    // Inicializamos el lienzo en blanco en formato horizontal (landscape) para mayor espacio de columnas
-    const doc = new PDFDocument({ 
-      size: 'LETTER', 
-      layout: 'landscape', 
-      margin: 40 
-    });
-    
-    // Canaliza el flujo de bytes directo a la respuesta HTTP de Render
-    doc.pipe(res); 
-
-    // =========================================================================
-    // 📊 ENCABEZADO Y BALANCE FINANCIERO PREMIUM (Ancho horizontal: 712 puntos)
-    // =========================================================================
-    
-    // Banner Principal
-    doc.rect(40, 40, 712, 50).fill('#0f172a'); // Color Slate-900
-    doc.fillColor('#ffffff').fontSize(14).font('Helvetica-Bold').text('REPORTE GENERAL DE INGRESOS Y AUDITORÍA DE CAJA', 55, 50);
-    doc.fontSize(8).font('Helvetica-Oblique').text(`Consolidado del Sistema Financiero | Generado: ${new Date().toLocaleString()}`, 55, 68);
-
-    // --- TARJETAS INFORMATIVAS DE BALANCE EN VIVO ---
-    let boxWidth = 224;
-    let boxY = 105;
-
-    // Caja 1: Total Recaudado en USD
-    doc.rect(40, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
-    doc.fillColor('#475569').fontSize(7).font('Helvetica-Bold').text('TOTAL DIVISAS EN EFECTIVO (USD)', 50, boxY + 10);
-    doc.fillColor('#0f172a').fontSize(14).font('Helvetica-Bold').text(`$ ${totalDolares.toFixed(2)}`, 50, boxY + 22);
-
-    // Caja 2: Total Recaudado en Bolívares
-    doc.rect(40 + boxWidth + 20, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
-    doc.fillColor('#059669').fontSize(7).font('Helvetica-Bold').text('TOTAL RECAUDADO EN BOLÍVARES (VES)', 40 + boxWidth + 30, boxY + 10);
-    doc.fillColor('#047857').fontSize(14).font('Helvetica-Bold').text(`${totalBolivares.toFixed(2)} VES`, 40 + boxWidth + 30, boxY + 22);
-
-    // Caja 3: Total Recibos Emitidos
-    doc.rect(40 + (boxWidth * 2) + 40, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
-    doc.fillColor('#475569').fontSize(7).font('Helvetica-Bold').text('COMPROBANTES TOTALES EMITIDOS', 40 + (boxWidth * 2) + 50, boxY + 10);
-    doc.fillColor('#0f172a').fontSize(14).font('Helvetica-Bold').text(`${totalTransacciones} Transacciones`, 40 + (boxWidth * 2) + 50, boxY + 22);
-
-    // =========================================================================
-    // 📋 ESTRUCTURA Y MAQUETACIÓN DE LA TABLA GENERAL DE TRANSACCIONES
-    // =========================================================================
-    let y = 170;
-    doc.fillColor('#1e293b').fontSize(10).font('Helvetica-Bold').text('DETALLE INDIVIDUAL DE MOVIMIENTOS A CAJA', 40, y);
-    y += 15;
-
-    // Encabezado de la tabla ancha
-    doc.rect(40, y, 712, 20).fill('#e2e8f0');
-    doc.fillColor('#334155').font('Helvetica-Bold').fontSize(8);
-    doc.text('ID Recibo', 45, y + 6, { width: 45 });
-    doc.text('Atleta / Alumno', 100, y + 6, { width: 140 });
-    doc.text('Cédula Rep.', 250, y + 6, { width: 70 });
-    doc.text('Mes Cobro', 330, y + 6, { width: 65 });
-    doc.text('Fecha Pago', 405, y + 6, { width: 65 });
-    doc.text('Método', 480, y + 6, { width: 60 });
-    doc.text('Monto ($)', 550, y + 6, { width: 55, align: 'right' });
-    doc.text('Monto (Bs.)', 615, y + 6, { width: 75, align: 'right' });
-    doc.text('Origen', 700, y + 6, { width: 45, align: 'center' });
-    
-    y += 20;
-
-    // Inyección de filas dinámicas leídas de la BD de Aiven
-    doc.font('Helvetica').fontSize(8).fillColor('#0f172a');
-    
-    if (rows.length === 0) {
-      doc.text('No existen movimientos registrados en el histórico de caja.', 40, y + 15, { align: 'center', width: 712 });
-    } else {
-      rows.forEach((pago, index) => {
-        // Control inteligente de saltos de página (Límite máximo horizontal ~ 510 puntos)
-        if (y > 510) { 
-          doc.addPage({ size: 'LETTER', layout: 'landscape', margin: 40 }); 
-          y = 40; 
-        }
-
-        // Estilo de filas alternas Claro Premium
-        if (index % 2 === 0) {
-          doc.rect(40, y, 712, 18).fill('#f8fafc');
-          doc.fillColor('#0f172a');
-        }
-
-        const fechaFormateada = new Date(pago.fecha_registro).toLocaleDateString();
-        const procedencia = pago.guardado_offline ? 'OFFLINE' : 'RED';
-
-        doc.text(`#${pago.id}`, 45, y + 5, { width: 45 });
-        doc.text(pago.nombre_alumno, 100, y + 5, { width: 140, ellipsis: true });
-        doc.text(pago.cedula_representante || 'N/P', 250, y + 5, { width: 70 });
-        doc.text(pago.mes_pagado, 330, y + 5, { width: 65 });
-        doc.text(fechaFormateada, 405, y + 5, { width: 65 });
-        doc.text(pago.metodo_pago.toUpperCase(), 480, y + 5, { width: 60 });
-        doc.text(`$${parseFloat(pago.monto_dolares || 0).toFixed(2)}`, 550, y + 5, { width: 55, align: 'right' });
-        doc.text(`${parseFloat(pago.monto_bolivares || 0).toFixed(2)}`, 615, y + 5, { width: 75, align: 'right' });
-        doc.text(procedencia, 700, y + 5, { width: 45, align: 'center' });
-
-        doc.strokeColor('#f1f5f9').lineWidth(0.5).moveTo(40, y + 18).lineTo(752, y + 18).stroke();
-        y += 18;
-      });
-    }
-
-    // Cierre formal del documento
-    doc.strokeColor('#0f172a').lineWidth(1).moveTo(40, 560).lineTo(752, 560).stroke();
-    doc.fillColor('#94a3b8').fontSize(7).text('Reporte de Auditoría Central Interno - Desarrollado bajo especificaciones de resiliencia Offline-First.', 40, 568);
-
-    doc.end();
-
-  } catch (error) {
-    console.error('❌ Error crítico en generación vectorial del PDF general:', error);
-    return res.status(500).send('Error interno del servidor al procesar el archivo imprimible.');
-  }
-});
-
 module.exports = router;

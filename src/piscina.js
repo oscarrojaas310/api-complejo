@@ -221,21 +221,18 @@ router.get('/reporte-general', async (req, res) => {
       totalBolivares += parseFloat(pago.monto_bolivares || 0);
     });
 
-    // 3. Configuración de cabeceras HTTP para apertura nativa en el navegador
+    // Cabeceras que ya tienes para abrir el PDF nativo
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'inline; filename=Balance_General_Caja_Piscina.pdf');
+
+    // 🛡️ CONTROL TOTAL ANTI-CACHÉ PARA NAVEGADORES MÓVILES (Añade estas 3 líneas):
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
-    // Inicializamos el lienzo en blanco en formato horizontal (landscape)
-    const doc = new PDFDocument({ 
-      size: 'LETTER', 
-      layout: 'landscape', 
-      margin: 40 
-    });
-    
-    // Canaliza el flujo de bytes directo a la respuesta HTTP de Render
-    doc.pipe(res); 
+
+    // Inicializas tu lienzo de PDFKit...
+    const doc = new PDFDocument({ size: 'LETTER', layout: 'landscape', margin: 40 });
+    doc.pipe(res);
 
     // Banner Principal
     doc.rect(40, 40, 712, 50).fill('#0f172a');

@@ -224,7 +224,9 @@ router.get('/reporte-general', async (req, res) => {
     // 3. Configuración de cabeceras HTTP para apertura nativa en el navegador
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'inline; filename=Balance_General_Caja_Piscina.pdf');
-
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     // Inicializamos el lienzo en blanco en formato horizontal (landscape)
     const doc = new PDFDocument({ 
       size: 'LETTER', 

@@ -674,9 +674,10 @@ router.get('/eventos', async (req, res) => {
   }
 });
 
-// 3. GET: Generar y descargar el contrato legal en formato PDF vectorizado
+// 3. GET: Generar y descargar el contrato legal en formato PDF vectorizado con Cintillo Premium
 router.get('/eventos/:id/pdf', async (req, res) => {
   const { id } = req.params;
+  const path = require('path'); // Asegúrate de tener importado path para ubicar el WebP
 
   try {
     // Buscamos el evento exacto en la base de datos de Aiven
@@ -697,61 +698,70 @@ router.get('/eventos/:id/pdf', async (req, res) => {
     const doc = new PDFDocument({ margin: 50, size: 'LETTER' });
     doc.pipe(res); // Canaliza el flujo de bytes directo a la respuesta HTTP de Render
 
-    // 📄 MEMBRETE INSTITUCIONAL DEL COMPLEJO
-    doc.fontSize(20).font('Helvetica-Bold').fillColor('#047857').text('COMPLEJO DEPORTIVO RECREACIONAL LOS PINOS', { align: 'center' });
+    // =========================================================================
+    // 📄 INYECCIÓN DEL CINTILLO CORPORATIVO (Optimizado en .webp)
+    // =========================================================================
+    // Buscamos el archivo directamente en tu carpeta public del proyecto
+    const rutaCintillo = path.join(__dirname, '../../public/cintillo.webp');
+    
+    // Dibujamos el cintillo arriba ajustado al ancho disponible (512 puntos entre márgenes de 50)
+    doc.image(rutaCintillo, 50, 40, { width: 512 });
+    
+    // Posicionamos el cursor de dibujo justo debajo del cintillo insertado
+    doc.y = 95; 
+    
     doc.fontSize(9).font('Helvetica').fillColor('#475569').text('Control de Alquileres de Áreas Especiales y Piscina', { align: 'center' });
     doc.text('Mérida, Venezuela · Soporte Corporativo', { align: 'center' });
     
-    doc.moveDown(1);
+    doc.moveDown(0.8);
     doc.strokeColor('#cbd5e1').lineWidth(1).moveTo(50, doc.y).lineTo(562, doc.y).stroke(); // Línea divisoria elegante
-    doc.moveDown(1.5);
+    doc.moveDown(1.2);
 
     // 📌 NÚMERO DE CONTRATO Y FECHA DE REGISTRO
     doc.fontSize(12).font('Helvetica-Bold').fillColor('#0f172a').text(`CONTRATO DE ARRENDAMIENTO DE ÁREA DE PISCINA N° 0026-${id}`, { align: 'left' });
     doc.fontSize(10).font('Helvetica').fillColor('#475569').text(`Fecha de Emisión: ${new Date().toISOString().substring(0,10)}`, { align: 'left' });
-    doc.moveDown(1.5);
+    doc.moveDown(1.2);
 
     // 👤 FICHA TÉCNICA DEL CONTRATANTE
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('1. PARTES CONTRATANTES Y RESPONSABLE', { underline: true });
-    doc.moveDown(0.5);
+    doc.moveDown(0.4);
     doc.fontSize(10).font('Helvetica').fillColor('#334155');
     doc.text(`Nombre del Responsable:  ${evento.responsable}`);
     doc.text(`Cédula de Identidad:          ${evento.cedula_responsable}`);
     doc.text(`Teléfono de Contacto:       ${evento.telefono}`);
     doc.text(`Área de Concesión:           Instalaciones de la Piscina Principal y Áreas Verdes Adyacentes`);
-    doc.moveDown(1.5);
+    doc.moveDown(1.2);
 
     // ⏱️ DATOS CRONOLÓGICOS DEL COMPROMISO
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('2. VIGENCIA Y HORARIOS DEL COMPROMISO', { underline: true });
-    doc.moveDown(0.5);
+    doc.moveDown(0.4);
     doc.fontSize(10).font('Helvetica').fillColor('#334155');
     doc.text(`Fecha Agendada:     ${fechaFormateada}`);
     doc.text(`Hora de Entrada:      ${evento.hora_inicio.substring(0, 5)} (Hora exacta de entrega de instalaciones)`);
     doc.text(`Hora de Salida:       ${evento.hora_fin.substring(0, 5)} (Hora de desalojo definitivo)`);
-    doc.moveDown(1.5);
+    doc.moveDown(1.2);
 
     // 💵 CLÁUSULAS FINANCIERAS BIMONETARIAS
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('3. CONDICIONES FINANCIERAS Y ABONOS', { underline: true });
-    doc.moveDown(0.5);
+    doc.moveDown(0.4);
     doc.text(`Canon de Arrendamiento:       $${parseFloat(evento.monto_dolares).toFixed(2)} USD`);
     doc.text(`Tasa Cambiaria BCV:               ${parseFloat(evento.tasa_bcv).toFixed(2)} VES por 1 USD`);
     doc.text(`Total en Moneda Nacional:    Bs. ${parseFloat(evento.monto_bolivares).toFixed(2)} VES`);
-    doc.text(`Estatus del Pago:                     ${evento.estatus === 'Liquidado' ? ' LIQUIDADO / CANCELADO COMPLETAMENTE' : 'APARTADO (Requiere completar saldo al ingresar)'}`);
-    doc.moveDown(1.5);
+    doc.text(`Estatus del Pago:                     ${evento.estatus === 'Liquidado' ? ' LIQUIDADO / CANCELADO COMPLETAMENTE' : 'APARTADO (Requiele completar saldo al ingresar)'}`);
+    doc.moveDown(1.2);
 
     // 📝 SECCIÓN DE OBSERVACIONES PARTICULARES
     if (evento.observaciones) {
       doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('4. OBSERVACIONES Y DETALLES DEL ALQUILER', { underline: true });
-      doc.moveDown(0.5);
+      doc.moveDown(0.4);
       doc.fontSize(10).font('Helvetica-Oblique').fillColor('#475569').text(`"${evento.observaciones}"`, { width: 512, align: 'justify' });
-      doc.moveDown(1.5);
+      doc.moveDown(1.2);
     }
 
-
-     // ⚖️ CLÁUSULAS LEGALES ESTÁNDAR COMPLEJO LOS PINOS (REPARADO)
+    // ⚖️ CLÁUSULAS LEGALES ESTÁNDAR COMPLEJO LOS PINOS
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('5. CLÁUSULAS DE SEGURIDAD Y RESPONSABILIDAD', { underline: true });
     doc.moveDown(0.4);
-    doc.fontSize(8.5).font('Helvetica').fillColor('#475569'); // Reducimos sutilmente a 8.5 para blindar el espacio
+    doc.fontSize(8.5).font('Helvetica').fillColor('#475569');
     
     const clausulas = [
       "PRIMERA: El contratante se hace enteramente responsable por el comportamiento de sus invitados y el cuidado de las instalaciones.",
@@ -760,20 +770,27 @@ router.get('/eventos/:id/pdf', async (req, res) => {
       "CUARTA: Las horas extras que excedan el tiempo estipulado en la sección (2) tendrán un recargo de $30 USD por hora fraccionada."
     ];
     
-    // ✅ REPARADO: Ahora imprime la variable "c" (la cláusula individual), no el arreglo completo
     clausulas.forEach(c => doc.text(c, { width: 512, align: 'justify' }).moveDown(0.2));
     
-    // ✍️ BLOQUE DE FIRMAS DIGITALES DE RESGUARDO (Márgenes Blindados de Página Única)
-    doc.moveDown(3.5); // Reducido de 4 a 2.5 para jalar las firmas arriba de forma segura
-    const yFirma = doc.y;
+    // =========================================================================
+    // ✍️ BLOQUE DE FIRMAS BLINDADO EN EL MARGEN INFERIOR (Estilo Footer)
+    // =========================================================================
+    // 1. Desactivamos el salto automático para anclar las firmas al fondo de la hoja actual
+    doc.options.autoPageBreak = false;
     
+    // 2. Establecemos la coordenada fija de dibujo en la base vertical de la hoja (660 puntos de 792 totales)
+    const yFirma = 660;
+    
+    // Líneas de firma sutiles
     doc.strokeColor('#cbd5e1').lineWidth(0.5).moveTo(80, yFirma).lineTo(220, yFirma).stroke();
     doc.strokeColor('#cbd5e1').lineWidth(0.5).moveTo(340, yFirma).lineTo(480, yFirma).stroke();
     
-    doc.moveDown(0.2);
     doc.fontSize(9).font('Helvetica-Bold').fillColor('#334155');
-    doc.text('Por el Complejo Los Pinos', 80, yFirma + 5, { width: 140, align: 'center' });
-    doc.text('Firma del Responsable', 340, yFirma + 5, { width: 140, align: 'center' });
+    doc.text('Por el Complejo Los Pinos', 80, yFirma + 8, { width: 140, align: 'center' });
+    doc.text('Firma del Responsable', 340, yFirma + 8, { width: 140, align: 'center' });
+
+    // 3. Reactivamos la opción estándar
+    doc.options.autoPageBreak = true;
 
     // Finaliza el flujo y despacha el archivo binario
     doc.end();

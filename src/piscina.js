@@ -194,8 +194,11 @@ router.get('/dashboard', async (req, res) => {
   }
 });
 
+// GET: Generar y descargar el balance general de caja horizontal con Cintillo Premium
 router.get('/reporte-general', async (req, res) => {
   const PDFDocument = require('pdfkit');
+  const path = require('path');
+  const fs = require('fs'); // Requerido para la lectura síncrona inmune al bug
   
   try {
     // 1. Buscamos todos los pagos cruzando datos con la nómina de atletas de Aiven MySQL
@@ -211,22 +214,31 @@ router.get('/reporte-general', async (req, res) => {
     
     const [rows] = await pool.query(querySQL);
     
-    // 2. Calcular Totales Consolidados con la lógica corregida
+    // 2. Calcular Totales Consolidados Saneados (Efectivo = USD, Bancos = VES)
     let totalDolaresEfectivo = 0;
     let totalBolivaresBancos = 0;
     const totalTransacciones = rows.length;
 
     rows.forEach(pago => {
       const metodo = pago.metodo_pago ? pago.metodo_pago.toLowerCase().trim() : '';
-      
       if (metodo === 'efectivo') {
-        // REGLA CORREGIDA: Si es efectivo, se suma directo a la billetera física de Dólares (USD)
         totalDolaresEfectivo += parseFloat(pago.monto_dolares || 0);
       } else {
-        // REGLA CORREGIDA: Si es pago móvil o transferencia, se suma a la recaudación bancaria en Bolívares (VES)
         totalBolivaresBancos += parseFloat(pago.monto_bolivares || 0);
       }
     });
+
+    // 🌟 ENGRANAJE DE SEGURIDAD ABSOLUTO:
+    // Cargamos el cintillo como Buffer antes de inicializar PDFKit para que no tumbe el servidor
+    const rutaCintillo = path.join(__dirname, '../../public/cintillo.webp');
+    let cintilloBuffer = null;
+    try {
+      if (fs.existsSync(rutaCintillo)) {
+        cintilloBuffer = fs.readFileSync(rutaCintillo);
+      }
+    } catch (errImg) {
+      console.error('Error cargando el archivo de imagen corporativa:', errImg.message);
+    }
 
     // Cabeceras HTTP anti-caché óptimas para dispositivos móviles
     res.setHeader('Content-Type', 'application/pdf');
@@ -235,107 +247,118 @@ router.get('/reporte-general', async (req, res) => {
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
 
-    // Inicialización del lienzo horizontal (Landscape)
+    // Inicializas tu lienzo de PDFKit en formato Horizontal (Landscape)
     const doc = new PDFDocument({ size: 'LETTER', layout: 'landscape', margin: 40 });
     doc.pipe(res);
 
-    // Banner Principal
-    doc.rect(40, 40, 712, 50).fill('#0f172a');
-    doc.fillColor('#ffffff').fontSize(14).font('Helvetica-Bold').text('REPORTE GENERAL DE INGRESOS Y AUDITORÍA DE CAJA', 55, 50);
-    doc.fontSize(8).font('Helvetica-Oblique').text(`Consolidado del Sistema Financiero Los Pinos | Generado: ${new Date().toLocaleString()}`, 55, 68);
+    // =========================================================================
+    // 📄 INYECCIÓN EN MEMORIA DEL CINTILLO CORPORATIVO (Ocupa los 712 puntos de ancho)
+    // =========================================================================
+    if (cintilloBuffer) {
+      doc.image(cintilloBuffer, 40, 35, { width: 712 });
+      doc.y = 85; // Bajamos el cursor estratégicamente debajo del cintillo
+    } else {
+      // Fallback seguro en bloque Slate si la imagen no está en disco
+      doc.rect(40, 40, 712, 45).fill('#0f172a');
+      doc.fillColor('#ffffff').fontSize(12).font('Helvetica-Bold').text('REPORTE GENERAL DE INGRESOS Y AUDITORÍA DE CAJA', 55, 48);
+      doc.y = 85;
+    }
 
-    // --- Tarjetas Informativas Corregidas y Saneadas ---
+    doc.fillColor('#1e293b').fontSize(8).font('Helvetica-Oblique').text(`Consolidado del Sistema Financiero Los Pinos | Generado: ${new Date().toLocaleString()}`, 40, doc.y);
+    doc.moveDown(0.5);
+
+    // --- Tarjetas Informativas Con Correciones de Recaudación Real ---
     let boxWidth = 224;
-    let boxY = 105;
+    let boxY = doc.y;
 
     // Caja 1: Efectivo en Divisas (USD)
-    doc.rect(40, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
-    doc.fillColor('#475569').fontSize(7).font('Helvetica-Bold').text('TOTAL DIVISAS EN EFECTIVO (USD)', 50, boxY + 10);
-    doc.fillColor('#0f172a').fontSize(14).font('Helvetica-Bold').text(`$ ${totalDolaresEfectivo.toFixed(2)}`, 50, boxY + 22);
+    doc.rect(40, boxY, boxWidth, 40).fill('#f8fafc').stroke('#e2e8f0');
+    doc.fillColor('#475569').fontSize(7).font('Helvetica-Bold').text('TOTAL DIVISAS EN EFECTIVO (USD)', 50, boxY + 8);
+    doc.fillColor('#0f172a').fontSize(12).font('Helvetica-Bold').text(`$ ${totalDolaresEfectivo.toFixed(2)}`, 50, boxY + 18);
 
     // Caja 2: Recaudación Bancaria / Medios Electrónicos (VES)
-    doc.rect(40 + boxWidth + 20, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
-    doc.fillColor('#059669').fontSize(7).font('Helvetica-Bold').text('TOTAL RECAUDADO EN BANCARIAS (VES)', 40 + boxWidth + 30, boxY + 10);
-    doc.fillColor('#047857').fontSize(14).font('Helvetica-Bold').text(`${totalBolivaresBancos.toFixed(2)} VES`, 40 + boxWidth + 30, boxY + 22);
+    doc.rect(40 + boxWidth + 20, boxY, boxWidth, 40).fill('#f8fafc').stroke('#e2e8f0');
+    doc.fillColor('#059669').fontSize(7).font('Helvetica-Bold').text('TOTAL RECAUDADO EN BANCARIAS (VES)', 40 + boxWidth + 30, boxY + 8);
+    doc.fillColor('#047857').fontSize(12).font('Helvetica-Bold').text(`${totalBolivaresBancos.toFixed(2)} VES`, 40 + boxWidth + 30, boxY + 18);
 
     // Caja 3: Volumen de Transacciones
-    doc.rect(40 + (boxWidth * 2) + 40, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
-    doc.fillColor('#475569').fontSize(7).font('Helvetica-Bold').text('COMPROBANTES TOTALES EMITIDOS', 40 + (boxWidth * 2) + 50, boxY + 10);
-    doc.fillColor('#0f172a').fontSize(14).font('Helvetica-Bold').text(`${totalTransacciones} Transacciones`, 40 + (boxWidth * 2) + 50, boxY + 22);
+    doc.rect(40 + (boxWidth * 2) + 40, boxY, boxWidth, 40).fill('#f8fafc').stroke('#e2e8f0');
+    doc.fillColor('#475569').fontSize(7).font('Helvetica-Bold').text('COMPROBANTES TOTALES EMITIDOS', 40 + (boxWidth * 2) + 50, boxY + 8);
+    doc.fillColor('#0f172a').fontSize(12).font('Helvetica-Bold').text(`${totalTransacciones} Transacciones`, 40 + (boxWidth * 2) + 50, boxY + 18);
 
     // --- Estructura de la Tabla General ---
-    let y = 170;
-    doc.fillColor('#1e293b').fontSize(10).font('Helvetica-Bold').text('DETALLE INDIVIDUAL DE MOVIMIENTOS A CAJA', 40, y);
-    y += 15;
+    let y = boxY + 55;
+    doc.fillColor('#1e293b').fontSize(9).font('Helvetica-Bold').text('DETALLE INDIVIDUAL DE MOVIMIENTOS A CAJA', 40, y);
+    y += 12;
 
-    doc.rect(40, y, 712, 20).fill('#e2e8f0');
+    doc.rect(40, y, 712, 18).fill('#e2e8f0');
     doc.fillColor('#334155').font('Helvetica-Bold').fontSize(8);
-    doc.text('ID Recibo', 45, y + 6, { width: 45 });
-    doc.text('Atleta / Alumno', 100, y + 6, { width: 140 });
-    doc.text('Cédula Rep.', 250, y + 6, { width: 70 });
-    doc.text('Mes Cobro', 330, y + 6, { width: 65 });
-    doc.text('Fecha Pago', 405, y + 6, { width: 65 });
-    doc.text('Método', 480, y + 6, { width: 60 });
-    doc.text('Monto ($)', 550, y + 6, { width: 55, align: 'right' });
-    doc.text('Monto (Bs.)', 615, y + 6, { width: 75, align: 'right' });
-    doc.text('Referencia', 700, y + 6, { width: 50, align: 'center' });
+    doc.text('ID Recibo', 45, y + 5, { width: 45 });
+    doc.text('Atleta / Alumno', 100, y + 5, { width: 140 });
+    doc.text('Cédula Rep.', 250, y + 5, { width: 70 });
+    doc.text('Mes Cobro', 330, y + 5, { width: 65 });
+    doc.text('Fecha Pago', 405, y + 5, { width: 65 });
+    doc.text('Método', 480, y + 5, { width: 60 });
+    doc.text('Monto ($)', 550, y + 5, { width: 55, align: 'right' });
+    doc.text('Monto (Bs.)', 615, y + 5, { width: 75, align: 'right' });
+    doc.text('Referencia', 700, y + 5, { width: 50, align: 'center' });
     
-    y += 20;
+    y += 18;
 
     doc.font('Helvetica').fontSize(8).fillColor('#0f172a');
     
     rows.forEach((pago, index) => {
-      // Control de salto de página seguro a los 490 puntos
+      // Control de salto de página seguro a los 490 puntos para proteger el pie de página
       if (y > 490) { 
         doc.addPage({ size: 'LETTER', layout: 'landscape', margin: 40 }); 
         y = 40; 
       }
 
       if (index % 2 === 0) {
-        doc.rect(40, y, 712, 18).fill('#f8fafc');
+        doc.rect(40, y, 712, 16).fill('#f8fafc');
         doc.fillColor('#0f172a');
       }
 
       const fechaFormateada = new Date(pago.fecha_registro).toLocaleDateString();
       const metodoTexto = pago.metodo_pago ? pago.metodo_pago.toUpperCase() : '';
       
-      // LÓGICA CORREGIDA PARA LAS COLUMNAS DINÁMICAS
+      // Control lógico de campos dinámicos
       let refTexto = 'N/A';
       let montoBsTexto = 'N/A';
 
       if (metodoTexto !== 'EFECTIVO') {
-        // Si es pago digital, inyectamos la referencia y el monto formateado en bolívares
         if (pago.referencia) refTexto = pago.referencia;
         montoBsTexto = `${parseFloat(pago.monto_bolivares || 0).toFixed(2)}`;
       }
 
-      doc.text(`#${pago.id}`, 45, y + 5, { width: 45 });
-      doc.text(pago.nombre_alumno, 100, y + 5, { width: 140, ellipsis: true });
-      doc.text(pago.cedula_representante || 'N/P', 250, y + 5, { width: 70 });
-      doc.text(pago.mes_pagado, 330, y + 5, { width: 65 });
-      doc.text(fechaFormateada, 405, y + 5, { width: 65 });
-      doc.text(metodoTexto, 480, y + 5, { width: 60 });
-      doc.text(`$${parseFloat(pago.monto_dolares || 0).toFixed(2)}`, 550, y + 5, { width: 55, align: 'right' });
-      
-      // Renderizado del monto en Bs. (Muestra la cifra o un "N/A" limpio centrado/alineado)
-      doc.text(montoBsTexto, 615, y + 5, { width: 75, align: 'right' });
-      doc.text(refTexto, 700, y + 5, { width: 50, align: 'center' });
+      doc.text(`#${pago.id}`, 45, y + 4, { width: 45 });
+      doc.text(pago.nombre_alumno, 100, y + 4, { width: 140, ellipsis: true });
+      doc.text(pago.cedula_representante || 'N/P', 250, y + 4, { width: 70 });
+      doc.text(pago.mes_pagado, 330, y + 4, { width: 65 });
+      doc.text(fechaFormateada, 405, y + 4, { width: 65 });
+      doc.text(metodoTexto, 480, y + 4, { width: 60 });
+      doc.text(`$${parseFloat(pago.monto_dolares || 0).toFixed(2)}`, 550, y + 4, { width: 55, align: 'right' });
+      doc.text(montoBsTexto, 615, y + 4, { width: 75, align: 'right' });
+      doc.text(refTexto, 700, y + 4, { width: 50, align: 'center' });
 
-      doc.strokeColor('#f1f5f9').lineWidth(0.5).moveTo(40, y + 18).lineTo(752, y + 18).stroke();
-      y += 18;
+      doc.strokeColor('#f1f5f9').lineWidth(0.5).moveTo(40, y + 16).lineTo(752, y + 16).stroke();
+      y += 16;
     });
 
-    // Control anti-salto de página para evitar hojas huérfanas
+    // 🌟 SECCIÓN FORMAL ANTI-SALTOS COMPACTADA ABAJO
     doc.options.autoPageBreak = false;
     doc.strokeColor('#0f172a').lineWidth(1).moveTo(40, 540).lineTo(752, 540).stroke();
     doc.fillColor('#94a3b8').fontSize(7).text('Reporte de Auditoría Central Interno - Desarrollado bajo especificaciones de resiliencia Offline-First.', 40, 550);
     doc.options.autoPageBreak = true;
 
+    // Cierre definitivo y despacho seguro del stream
     doc.end();
 
   } catch (error) {
-    console.error('❌ Error crítico en generación del PDF:', error);
-    return res.status(500).send('Error interno del servidor al procesar el archivo imprimible.');
+    console.error('❌ Error crítico en generación del PDF General:', error);
+    if (!res.headersSent) {
+      return res.status(500).send('Error interno del servidor al procesar el archivo imprimible.');
+    }
   }
 });
 
@@ -662,11 +685,21 @@ router.post('/eventos', async (req, res) => {
     return res.status(500).json({ error: 'Error interno al guardar la reserva.' });
   }
 });
-// 3. GET: Generar y descargar el contrato legal en formato PDF vectorizado con Cintillo Premium
+
+// 2. GET: Obtener el cronograma de todos los alquileres agendados
+router.get('/eventos', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM eventos_alquiler ORDER BY fecha ASC, hora_inicio ASC');
+    return res.status(200).json(rows);
+  } catch (error) {
+    console.error('❌ Error al consultar cronograma:', error);
+    return res.status(500).json({ error: 'Error al cargar la agenda de eventos.' });
+  }
+});
+
+// 3. GET: Generar y descargar el contrato legal en formato PDF vectorizado
 router.get('/eventos/:id/pdf', async (req, res) => {
   const { id } = req.params;
-  const path = require('path');
-  const fs = require('fs'); // IMPORTANTE: Requerimos el módulo del sistema de archivos
 
   try {
     // Buscamos el evento exacto en la base de datos de Aiven
@@ -679,23 +712,7 @@ router.get('/eventos/:id/pdf', async (req, res) => {
     const evento = rows[0];
     const fechaFormateada = new Date(evento.fecha).toISOString().substring(0, 10);
 
-    // 🌟 ENGRANAJE DE SEGURIDAD ABSOLUTO:
-    // Leemos la imagen como un Buffer de memoria en caliente antes de inicializar PDFKit.
-    // Esto elimina los micro-tiempos de lectura asíncrona del disco de Render.
-    const rutaCintillo = path.join(__dirname, '../../public/cintillo.webp');
-    let cintilloBuffer = null;
-    
-    try {
-      if (fs.existsSync(rutaCintillo)) {
-        cintilloBuffer = fs.readFileSync(rutaCintillo); // Lectura síncrona ultra veloz
-      } else {
-        console.warn(`⚠️ Advertencia: No se encontró el cintillo en la ruta: ${rutaCintillo}`);
-      }
-    } catch (errImg) {
-      console.error('Error cargando el archivo de imagen corporativa:', errImg.message);
-    }
-
-    // Configuración de cabeceras HTTP para apertura nativa
+    // Configuración de cabeceras HTTP para forzar la descarga o apertura del PDF nativo
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=Contrato_Alquiler_LosPinos_${id}.pdf`);
 
@@ -703,69 +720,61 @@ router.get('/eventos/:id/pdf', async (req, res) => {
     const doc = new PDFDocument({ margin: 50, size: 'LETTER' });
     doc.pipe(res); // Canaliza el flujo de bytes directo a la respuesta HTTP de Render
 
-    // 📄 INYECCIÓN EN MEMORIA DEL CINTILLO CORPORATIVO
-    if (cintilloBuffer) {
-      // Pasamos el Buffer directamente, eliminando lecturas asíncronas colisionadas
-      doc.image(cintilloBuffer, 50, 40, { width: 512 });
-      doc.y = 95;
-    } else {
-      // Fallback seguro en texto por si borras la imagen por error para que no se quede en blanco
-      doc.y = 40;
-      doc.fontSize(14).font('Helvetica-Bold').fillColor('#047857').text('COMPLEJO DEPORTIVO RECREACIONAL LOS PINOS', { align: 'center' });
-    }
-    
+    // 📄 MEMBRETE INSTITUCIONAL DEL COMPLEJO
+    doc.fontSize(20).font('Helvetica-Bold').fillColor('#047857').text('COMPLEJO DEPORTIVO RECREACIONAL LOS PINOS', { align: 'center' });
     doc.fontSize(9).font('Helvetica').fillColor('#475569').text('Control de Alquileres de Áreas Especiales y Piscina', { align: 'center' });
     doc.text('Mérida, Venezuela · Soporte Corporativo', { align: 'center' });
     
-    doc.moveDown(0.8);
+    doc.moveDown(1);
     doc.strokeColor('#cbd5e1').lineWidth(1).moveTo(50, doc.y).lineTo(562, doc.y).stroke(); // Línea divisoria elegante
-    doc.moveDown(1.2);
+    doc.moveDown(1.5);
 
     // 📌 NÚMERO DE CONTRATO Y FECHA DE REGISTRO
     doc.fontSize(12).font('Helvetica-Bold').fillColor('#0f172a').text(`CONTRATO DE ARRENDAMIENTO DE ÁREA DE PISCINA N° 0026-${id}`, { align: 'left' });
     doc.fontSize(10).font('Helvetica').fillColor('#475569').text(`Fecha de Emisión: ${new Date().toISOString().substring(0,10)}`, { align: 'left' });
-    doc.moveDown(1.2);
+    doc.moveDown(1.5);
 
     // 👤 FICHA TÉCNICA DEL CONTRATANTE
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('1. PARTES CONTRATANTES Y RESPONSABLE', { underline: true });
-    doc.moveDown(0.4);
+    doc.moveDown(0.5);
     doc.fontSize(10).font('Helvetica').fillColor('#334155');
     doc.text(`Nombre del Responsable:  ${evento.responsable}`);
     doc.text(`Cédula de Identidad:          ${evento.cedula_responsable}`);
     doc.text(`Teléfono de Contacto:       ${evento.telefono}`);
     doc.text(`Área de Concesión:           Instalaciones de la Piscina Principal y Áreas Verdes Adyacentes`);
-    doc.moveDown(1.2);
+    doc.moveDown(1.5);
 
     // ⏱️ DATOS CRONOLÓGICOS DEL COMPROMISO
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('2. VIGENCIA Y HORARIOS DEL COMPROMISO', { underline: true });
-    doc.moveDown(0.4);
+    doc.moveDown(0.5);
     doc.fontSize(10).font('Helvetica').fillColor('#334155');
     doc.text(`Fecha Agendada:     ${fechaFormateada}`);
     doc.text(`Hora de Entrada:      ${evento.hora_inicio.substring(0, 5)} (Hora exacta de entrega de instalaciones)`);
     doc.text(`Hora de Salida:       ${evento.hora_fin.substring(0, 5)} (Hora de desalojo definitivo)`);
-    doc.moveDown(1.2);
+    doc.moveDown(1.5);
 
     // 💵 CLÁUSULAS FINANCIERAS BIMONETARIAS
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('3. CONDICIONES FINANCIERAS Y ABONOS', { underline: true });
-    doc.moveDown(0.4);
+    doc.moveDown(0.5);
     doc.text(`Canon de Arrendamiento:       $${parseFloat(evento.monto_dolares).toFixed(2)} USD`);
     doc.text(`Tasa Cambiaria BCV:               ${parseFloat(evento.tasa_bcv).toFixed(2)} VES por 1 USD`);
     doc.text(`Total en Moneda Nacional:    Bs. ${parseFloat(evento.monto_bolivares).toFixed(2)} VES`);
     doc.text(`Estatus del Pago:                     ${evento.estatus === 'Liquidado' ? ' LIQUIDADO / CANCELADO COMPLETAMENTE' : 'APARTADO (Requiere completar saldo al ingresar)'}`);
-    doc.moveDown(1.2);
+    doc.moveDown(1.5);
 
     // 📝 SECCIÓN DE OBSERVACIONES PARTICULARES
     if (evento.observaciones) {
       doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('4. OBSERVACIONES Y DETALLES DEL ALQUILER', { underline: true });
-      doc.moveDown(0.4);
+      doc.moveDown(0.5);
       doc.fontSize(10).font('Helvetica-Oblique').fillColor('#475569').text(`"${evento.observaciones}"`, { width: 512, align: 'justify' });
-      doc.moveDown(1.2);
+      doc.moveDown(1.5);
     }
 
-    // ⚖️ CLÁUSULAS LEGALES ESTÁNDAR COMPLEJO LOS PINOS
+
+     // ⚖️ CLÁUSULAS LEGALES ESTÁNDAR COMPLEJO LOS PINOS (REPARADO)
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('5. CLÁUSULAS DE SEGURIDAD Y RESPONSABILIDAD', { underline: true });
     doc.moveDown(0.4);
-    doc.fontSize(8.5).font('Helvetica').fillColor('#475569');
+    doc.fontSize(8.5).font('Helvetica').fillColor('#475569'); // Reducimos sutilmente a 8.5 para blindar el espacio
     
     const clausulas = [
       "PRIMERA: El contratante se hace enteramente responsable por el comportamiento de sus invitados y el cuidado de las instalaciones.",
@@ -774,38 +783,29 @@ router.get('/eventos/:id/pdf', async (req, res) => {
       "CUARTA: Las horas extras que excedan el tiempo estipulado en la sección (2) tendrán un recargo de $30 USD por hora fraccionada."
     ];
     
-    clausulas.forEach(c => {
-      doc.text(c, { width: 512, align: 'justify' });
-      doc.moveDown(0.2);
-    });
+    // ✅ REPARADO: Ahora imprime la variable "c" (la cláusula individual), no el arreglo completo
+    clausulas.forEach(c => doc.text(c, { width: 512, align: 'justify' }).moveDown(0.2));
     
-    // =========================================================================
-    // ✍️ BLOQUE DE FIRMAS BLINDADO EN EL MARGEN INFERIOR (Estilo Footer)
-    // =========================================================================
-    doc.options.autoPageBreak = false;
-    const yFirma = 660;
+    // ✍️ BLOQUE DE FIRMAS DIGITALES DE RESGUARDO (Márgenes Blindados de Página Única)
+    doc.moveDown(3.5); // Reducido de 4 a 2.5 para jalar las firmas arriba de forma segura
+    const yFirma = doc.y;
     
     doc.strokeColor('#cbd5e1').lineWidth(0.5).moveTo(80, yFirma).lineTo(220, yFirma).stroke();
     doc.strokeColor('#cbd5e1').lineWidth(0.5).moveTo(340, yFirma).lineTo(480, yFirma).stroke();
     
+    doc.moveDown(0.2);
     doc.fontSize(9).font('Helvetica-Bold').fillColor('#334155');
-    doc.text('Por el Complejo Los Pinos', 80, yFirma + 8, { width: 140, align: 'center' });
-    doc.text('Firma del Responsable', 340, yFirma + 8, { width: 140, align: 'center' });
+    doc.text('Por el Complejo Los Pinos', 80, yFirma + 5, { width: 140, align: 'center' });
+    doc.text('Firma del Responsable', 340, yFirma + 5, { width: 140, align: 'center' });
 
-    doc.options.autoPageBreak = true;
-
-    // 🚀 AL FIN SEGURO: El documento cierra sabiendo que la imagen ya se grabó por completo
+    // Finaliza el flujo y despacha el archivo binario
     doc.end();
     
   } catch (error) {
     console.error('❌ Error crítico en generación vectorial del PDF:', error);
-    if (!res.headersSent) {
-      return res.status(500).send('Error interno del servidor al procesar el archivo imprimible.');
-    }
+    return res.status(500).send('Error interno del servidor al procesar el archivo imprimible.');
   }
 });
-
-
 
 // ENDPOINT: Registrar la asistencia diaria de todo un turno en bloque masivo
 router.post('/asistencia-diaria', async (req, res) => {

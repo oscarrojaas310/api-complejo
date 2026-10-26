@@ -669,7 +669,8 @@ router.get('/eventos/:id/pdf', async (req, res) => {
     // 🌟 INYECCIÓN SÍNCRONA ANTI-CAÍDAS:
     // Leemos el archivo físico del disco y lo cargamos a la memoria RAM antes de inicializar el PDF.
     // Esto evita que doc.end() cierre el stream antes de terminar de procesar la imagen.
-    const rutaCintillo = path.join(__dirname, '../../public/cintillo.webp');
+    const rutaCintillo = path.join(process.cwd(), 'public', 'cintillo.webp');
+
     let cintilloBuffer = null;
 
     try {

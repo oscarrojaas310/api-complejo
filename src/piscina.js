@@ -758,7 +758,7 @@ router.get('/eventos/:id/pdf', async (req, res) => {
       doc.moveDown(1.2);
     }
 
-    // ⚖️ CLÁUSULAS LEGALES ESTÁNDAR COMPLEJO LOS PINOS
+        // ⚖️ CLÁUSULAS LEGALES ESTÁNDAR COMPLEJO LOS PINOS
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('5. CLÁUSULAS DE SEGURIDAD Y RESPONSABILIDAD', { underline: true });
     doc.moveDown(0.4);
     doc.fontSize(8.5).font('Helvetica').fillColor('#475569');
@@ -770,34 +770,43 @@ router.get('/eventos/:id/pdf', async (req, res) => {
       "CUARTA: Las horas extras que excedan el tiempo estipulado en la sección (2) tendrán un recargo de $30 USD por hora fraccionada."
     ];
     
-    clausulas.forEach(c => doc.text(c, { width: 512, align: 'justify' }).moveDown(0.2));
+    // Imprimimos de manera síncrona cada cláusula
+    clausulas.forEach(c => {
+      doc.text(c, { width: 512, align: 'justify' });
+      doc.moveDown(0.2);
+    });
     
     // =========================================================================
     // ✍️ BLOQUE DE FIRMAS BLINDADO EN EL MARGEN INFERIOR (Estilo Footer)
     // =========================================================================
-    // 1. Desactivamos el salto automático para anclar las firmas al fondo de la hoja actual
+    // 1. Desactivamos el salto automático para anclar las firmas al fondo de la hoja actual de forma segura
     doc.options.autoPageBreak = false;
     
-    // 2. Establecemos la coordenada fija de dibujo en la base vertical de la hoja (660 puntos de 792 totales)
+    // 2. Establecemos la coordenada fija de dibujo en la base vertical de la hoja
     const yFirma = 660;
     
-    // Líneas de firma sutiles
+    // Dibujamos las líneas vectoriales de las firmas
     doc.strokeColor('#cbd5e1').lineWidth(0.5).moveTo(80, yFirma).lineTo(220, yFirma).stroke();
     doc.strokeColor('#cbd5e1').lineWidth(0.5).moveTo(340, yFirma).lineTo(480, yFirma).stroke();
     
+    // Inyectamos los textos explicativos debajo de cada línea indicando las coordenadas "X" e "Y" exactas
     doc.fontSize(9).font('Helvetica-Bold').fillColor('#334155');
     doc.text('Por el Complejo Los Pinos', 80, yFirma + 8, { width: 140, align: 'center' });
     doc.text('Firma del Responsable', 340, yFirma + 8, { width: 140, align: 'center' });
 
-    // 3. Reactivamos la opción estándar
+    // 3. Volvemos a encender la opción estándar por consistencia del lienzo
     doc.options.autoPageBreak = true;
 
-    // Finaliza el flujo y despacha el archivo binario
+    // ⚠️ 4. CRUCIAL: Ejecutamos el cierre del documento como el paso final absoluto
+    // Esto previene que PDFKit intente inyectar datos en un stream ya destruido
     doc.end();
     
   } catch (error) {
     console.error('❌ Error crítico en generación vectorial del PDF:', error);
-    return res.status(500).send('Error interno del servidor al procesar el archivo imprimible.');
+    // Blindaje: Si el error ocurre y las cabeceras aún no se han enviado, responde con estatus seguro
+    if (!res.headersSent) {
+      return res.status(500).send('Error interno del servidor al procesar el archivo imprimible.');
+    }
   }
 });
 

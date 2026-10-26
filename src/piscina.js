@@ -649,11 +649,10 @@ router.get('/eventos', async (req, res) => {
     return res.status(500).json({ error: 'Error al cargar la agenda de eventos.' });
   }
 });
-// 3. GET: Generar y descargar el contrato legal en formato PDF vectorizado con Cintillo WebP Síncrono
+
+// 3. GET: Generar y descargar el contrato legal en formato PDF vectorizado
 router.get('/eventos/:id/pdf', async (req, res) => {
   const { id } = req.params;
-  const path = require('path');
-  const fs = require('fs'); // Requerido para leer el archivo de forma síncrona en un Buffer
 
   try {
     // Buscamos el evento exacto en la base de datos de Aiven
@@ -666,28 +665,7 @@ router.get('/eventos/:id/pdf', async (req, res) => {
     const evento = rows[0];
     const fechaFormateada = new Date(evento.fecha).toISOString().substring(0, 10);
 
-        // =========================================================================
-    // 🛡️ BUSCADOR TRIPLE AUTOMATIZADO ANTI-RUTAS DE RENDER
-    // =========================================================================
-    
-      // =========================================================================
-    // 🛡️ LECTURA LOCAL SÍNCRONA: Archivo físico en el disco de Render (Opción A)
-    // =========================================================================
-    const rutaCintillo = path.join(process.cwd(), 'public', 'cintillo.webp');
-    let cintilloBuffer = null;
-
-    try {
-      if (fs.existsSync(rutaCintillo)) {
-        // Transformamos el WebP en bytes de memoria RAM inmediatamente
-        cintilloBuffer = fs.readFileSync(rutaCintillo);
-        console.log(`✅ ¡Éxito de Disco! Cintillo localizado y cargado desde: ${rutaCintillo}`);
-      } else {
-        console.warn(`⚠️ Advertencia de Almacenamiento: No existe el archivo en la ruta: ${rutaCintillo}`);
-      }
-    } catch (errImg) {
-      console.error('Error al procesar el Buffer de la imagen local:', errImg.message);
-    }
-    // Configuración de cabeceras HTTP para forzar la apertura del PDF nativo
+    // Configuración de cabeceras HTTP para forzar la descarga o apertura del PDF nativo
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=Contrato_Alquiler_LosPinos_${id}.pdf`);
 
@@ -695,67 +673,61 @@ router.get('/eventos/:id/pdf', async (req, res) => {
     const doc = new PDFDocument({ margin: 50, size: 'LETTER' });
     doc.pipe(res); // Canaliza el flujo de bytes directo a la respuesta HTTP de Render
 
-    // 📄 REEMPLAZO LOGO: Renderizado seguro del cintillo corporativo WebP
-    if (cintilloBuffer) {
-      // Pasamos el búfer directamente (ocupa los 512 puntos exactos de margen a margen)
-      doc.image(cintilloBuffer, 50, 40, { width: 512 });
-      doc.y = 95; // Posicionamos el cursor justo debajo del cintillo
-    } else {
-      doc.y = 40;
-    }
-
+    // 📄 MEMBRETE INSTITUCIONAL DEL COMPLEJO
+    doc.fontSize(20).font('Helvetica-Bold').fillColor('#047857').text('COMPLEJO DEPORTIVO RECREACIONAL LOS PINOS', { align: 'center' });
     doc.fontSize(9).font('Helvetica').fillColor('#475569').text('Control de Alquileres de Áreas Especiales y Piscina', { align: 'center' });
     doc.text('Mérida, Venezuela · Soporte Corporativo', { align: 'center' });
     
-    doc.moveDown(0.8);
+    doc.moveDown(1);
     doc.strokeColor('#cbd5e1').lineWidth(1).moveTo(50, doc.y).lineTo(562, doc.y).stroke(); // Línea divisoria elegante
-    doc.moveDown(1.2);
+    doc.moveDown(1.5);
 
     // 📌 NÚMERO DE CONTRATO Y FECHA DE REGISTRO
     doc.fontSize(12).font('Helvetica-Bold').fillColor('#0f172a').text(`CONTRATO DE ARRENDAMIENTO DE ÁREA DE PISCINA N° 0026-${id}`, { align: 'left' });
     doc.fontSize(10).font('Helvetica').fillColor('#475569').text(`Fecha de Emisión: ${new Date().toISOString().substring(0,10)}`, { align: 'left' });
-    doc.moveDown(1.2);
+    doc.moveDown(1.5);
 
     // 👤 FICHA TÉCNICA DEL CONTRATANTE
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('1. PARTES CONTRATANTES Y RESPONSABLE', { underline: true });
-    doc.moveDown(0.4);
+    doc.moveDown(0.5);
     doc.fontSize(10).font('Helvetica').fillColor('#334155');
     doc.text(`Nombre del Responsable:  ${evento.responsable}`);
     doc.text(`Cédula de Identidad:          ${evento.cedula_responsable}`);
     doc.text(`Teléfono de Contacto:       ${evento.telefono}`);
     doc.text(`Área de Concesión:           Instalaciones de la Piscina Principal y Áreas Verdes Adyacentes`);
-    doc.moveDown(1.2);
+    doc.moveDown(1.5);
 
     // ⏱️ DATOS CRONOLÓGICOS DEL COMPROMISO
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('2. VIGENCIA Y HORARIOS DEL COMPROMISO', { underline: true });
-    doc.moveDown(0.4);
+    doc.moveDown(0.5);
     doc.fontSize(10).font('Helvetica').fillColor('#334155');
     doc.text(`Fecha Agendada:     ${fechaFormateada}`);
     doc.text(`Hora de Entrada:      ${evento.hora_inicio.substring(0, 5)} (Hora exacta de entrega de instalaciones)`);
     doc.text(`Hora de Salida:       ${evento.hora_fin.substring(0, 5)} (Hora de desalojo definitivo)`);
-    doc.moveDown(1.2);
+    doc.moveDown(1.5);
 
     // 💵 CLÁUSULAS FINANCIERAS BIMONETARIAS
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('3. CONDICIONES FINANCIERAS Y ABONOS', { underline: true });
-    doc.moveDown(0.4);
+    doc.moveDown(0.5);
     doc.text(`Canon de Arrendamiento:       $${parseFloat(evento.monto_dolares).toFixed(2)} USD`);
     doc.text(`Tasa Cambiaria BCV:               ${parseFloat(evento.tasa_bcv).toFixed(2)} VES por 1 USD`);
     doc.text(`Total en Moneda Nacional:    Bs. ${parseFloat(evento.monto_bolivares).toFixed(2)} VES`);
     doc.text(`Estatus del Pago:                     ${evento.estatus === 'Liquidado' ? ' LIQUIDADO / CANCELADO COMPLETAMENTE' : 'APARTADO (Requiere completar saldo al ingresar)'}`);
-    doc.moveDown(1.2);
+    doc.moveDown(1.5);
 
     // 📝 SECCIÓN DE OBSERVACIONES PARTICULARES
     if (evento.observaciones) {
       doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('4. OBSERVACIONES Y DETALLES DEL ALQUILER', { underline: true });
-      doc.moveDown(0.4);
+      doc.moveDown(0.5);
       doc.fontSize(10).font('Helvetica-Oblique').fillColor('#475569').text(`"${evento.observaciones}"`, { width: 512, align: 'justify' });
-      doc.moveDown(1.2);
+      doc.moveDown(1.5);
     }
 
-    // ⚖️ CLÁUSULAS LEGALES ESTÁNDAR COMPLEJO LOS PINOS
+
+     // ⚖️ CLÁUSULAS LEGALES ESTÁNDAR COMPLEJO LOS PINOS (REPARADO)
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('5. CLÁUSULAS DE SEGURIDAD Y RESPONSABILIDAD', { underline: true });
     doc.moveDown(0.4);
-    doc.fontSize(8.5).font('Helvetica').fillColor('#475569');
+    doc.fontSize(8.5).font('Helvetica').fillColor('#475569'); // Reducimos sutilmente a 8.5 para blindar el espacio
     
     const clausulas = [
       "PRIMERA: El contratante se hace enteramente responsable por el comportamiento de sus invitados y el cuidado de las instalaciones.",
@@ -764,35 +736,27 @@ router.get('/eventos/:id/pdf', async (req, res) => {
       "CUARTA: Las horas extras que excedan el tiempo estipulado en la sección (2) tendrán un recargo de $30 USD por hora fraccionada."
     ];
     
+    // ✅ REPARADO: Ahora imprime la variable "c" (la cláusula individual), no el arreglo completo
     clausulas.forEach(c => doc.text(c, { width: 512, align: 'justify' }).moveDown(0.2));
     
-    // =========================================================================
-    // ✍️ ANCLAJE DE FIRMAS FIJO EN EL MARGEN INFERIOR (Estilo Footer Inmune)
-    // =========================================================================
-    // 1. Apagamos el salto automático para fijar las líneas en la base de la hoja actual
-    doc.options.autoPageBreak = false;
-    
-    // 2. Establecemos las coordenadas fijas del fondo (670 puntos de 792 totales de la hoja)
-    const yFirma = 670;
+    // ✍️ BLOQUE DE FIRMAS DIGITALES DE RESGUARDO (Márgenes Blindados de Página Única)
+    doc.moveDown(3.5); // Reducido de 4 a 2.5 para jalar las firmas arriba de forma segura
+    const yFirma = doc.y;
     
     doc.strokeColor('#cbd5e1').lineWidth(0.5).moveTo(80, yFirma).lineTo(220, yFirma).stroke();
     doc.strokeColor('#cbd5e1').lineWidth(0.5).moveTo(340, yFirma).lineTo(480, yFirma).stroke();
     
+    doc.moveDown(0.2);
     doc.fontSize(9).font('Helvetica-Bold').fillColor('#334155');
-    doc.text('Por el Complejo Los Pinos', 80, yFirma + 6, { width: 140, align: 'center' });
-    doc.text('Firma del Responsable', 340, yFirma + 6, { width: 140, align: 'center' });
+    doc.text('Por el Complejo Los Pinos', 80, yFirma + 5, { width: 140, align: 'center' });
+    doc.text('Firma del Responsable', 340, yFirma + 5, { width: 140, align: 'center' });
 
-    // 3. Dejamos encendido el parámetro por sanidad del flujo interno
-    doc.options.autoPageBreak = true;
-
-    // 🚀 CIERRE SEGURO SECUENCIAL: Se despacha como último paso absoluto
+    // Finaliza el flujo y despacha el archivo binario
     doc.end();
     
   } catch (error) {
     console.error('❌ Error crítico en generación vectorial del PDF:', error);
-    if (!res.headersSent) {
-      return res.status(500).send('Error interno del servidor al procesar el archivo imprimible.');
-    }
+    return res.status(500).send('Error interno del servidor al procesar el archivo imprimible.');
   }
 });
 

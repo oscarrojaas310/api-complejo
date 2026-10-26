@@ -669,32 +669,24 @@ router.get('/eventos/:id/pdf', async (req, res) => {
         // =========================================================================
     // 🛡️ BUSCADOR TRIPLE AUTOMATIZADO ANTI-RUTAS DE RENDER
     // =========================================================================
-    // Intento 1: Ruta estándar desde la raíz del proceso
-    let rutaCintillo = path.join(process.cwd(), 'public', 'cintillo.webp');
-
-    // Intento 2: Si falla, evalúa la ruta que reporta el log de Render
-    if (!fs.existsSync(rutaCintillo)) {
-      rutaCintillo = path.join(process.cwd(), 'src', 'public', 'cintillo.webp');
-    }
-
-    // Intento 3: Si sigue sin encontrarlo, busca relativo al archivo de rutas actual
-    if (!fs.existsSync(rutaCintillo)) {
-      rutaCintillo = path.join(__dirname, '..', 'public', 'cintillo.webp');
-    }
-
+    
+      // =========================================================================
+    // 🛡️ LECTURA LOCAL SÍNCRONA: Archivo físico en el disco de Render (Opción A)
+    // =========================================================================
+    const rutaCintillo = path.join(process.cwd(), 'public', 'cintillo.webp');
     let cintilloBuffer = null;
+
     try {
       if (fs.existsSync(rutaCintillo)) {
-        cintilloBuffer = fs.readFileSync(rutaCintillo); // Carga el Buffer síncrono si lo halla
-        console.log(`✅ ¡Éxito! Cintillo localizado físicamente en: ${rutaCintillo}`);
+        // Transformamos el WebP en bytes de memoria RAM inmediatamente
+        cintilloBuffer = fs.readFileSync(rutaCintillo);
+        console.log(`✅ ¡Éxito de Disco! Cintillo localizado y cargado desde: ${rutaCintillo}`);
       } else {
-        console.warn(`⚠️ Advertencia Extrema: No se localizó el archivo en ningún intento.`);
+        console.warn(`⚠️ Advertencia de Almacenamiento: No existe el archivo en la ruta: ${rutaCintillo}`);
       }
     } catch (errImg) {
-      console.error('Error al procesar el Buffer de la imagen:', errImg.message);
+      console.error('Error al procesar el Buffer de la imagen local:', errImg.message);
     }
-
-
     // Configuración de cabeceras HTTP para forzar la apertura del PDF nativo
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=Contrato_Alquiler_LosPinos_${id}.pdf`);

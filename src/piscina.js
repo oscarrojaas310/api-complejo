@@ -666,22 +666,34 @@ router.get('/eventos/:id/pdf', async (req, res) => {
     const evento = rows[0];
     const fechaFormateada = new Date(evento.fecha).toISOString().substring(0, 10);
 
-    // 🌟 INYECCIÓN SÍNCRONA ANTI-CAÍDAS:
-    // Leemos el archivo físico del disco y lo cargamos a la memoria RAM antes de inicializar el PDF.
-    // Esto evita que doc.end() cierre el stream antes de terminar de procesar la imagen.
-    const rutaCintillo = path.join(process.cwd(), 'public', 'cintillo.webp');
+        // =========================================================================
+    // 🛡️ BUSCADOR TRIPLE AUTOMATIZADO ANTI-RUTAS DE RENDER
+    // =========================================================================
+    // Intento 1: Ruta estándar desde la raíz del proceso
+    let rutaCintillo = path.join(process.cwd(), 'public', 'cintillo.webp');
+
+    // Intento 2: Si falla, evalúa la ruta que reporta el log de Render
+    if (!fs.existsSync(rutaCintillo)) {
+      rutaCintillo = path.join(process.cwd(), 'src', 'public', 'cintillo.webp');
+    }
+
+    // Intento 3: Si sigue sin encontrarlo, busca relativo al archivo de rutas actual
+    if (!fs.existsSync(rutaCintillo)) {
+      rutaCintillo = path.join(__dirname, '..', 'public', 'cintillo.webp');
+    }
 
     let cintilloBuffer = null;
-
     try {
       if (fs.existsSync(rutaCintillo)) {
-        cintilloBuffer = fs.readFileSync(rutaCintillo); // Carga binaria inmediata
+        cintilloBuffer = fs.readFileSync(rutaCintillo); // Carga el Buffer síncrono si lo halla
+        console.log(`✅ ¡Éxito! Cintillo localizado físicamente en: ${rutaCintillo}`);
       } else {
-        console.warn(`⚠️ Advertencia: No se localizó el cintillo en: ${rutaCintillo}`);
+        console.warn(`⚠️ Advertencia Extrema: No se localizó el archivo en ningún intento.`);
       }
     } catch (errImg) {
-      console.error('Error al mapear la imagen en el buffer:', errImg.message);
+      console.error('Error al procesar el Buffer de la imagen:', errImg.message);
     }
+
 
     // Configuración de cabeceras HTTP para forzar la apertura del PDF nativo
     res.setHeader('Content-Type', 'application/pdf');

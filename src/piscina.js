@@ -929,4 +929,81 @@ router.delete('/asistencia-eliminar', async (req, res) => {
     });
   }
 });
+
+
+
+
+// POST: Registrar matrícula de alumno en la Academia de Fútbol Menor
+router.post('/futbol/inscripciones', async (req, res) => {
+  const {
+    nombre_alumno,
+    edad_alumno,
+    direccion,
+    nombre_representante,
+    cedula_representante,
+    telefono_representante,
+    nivel,
+    horario_asignado
+  } = req.body;
+
+  // 🛡️ VALIDACIÓN ESTRICTA EN EL SERVIDOR CENTRAL:
+  // Verificamos la existencia de todos los campos obligatorios del menor y su representante
+  if (
+    !nombre_alumno || 
+    !edad_alumno || 
+    !direccion || 
+    !nombre_representante || 
+    !cedula_representante || 
+    !telefono_representante || 
+    !nivel || 
+    !horario_asignado
+  ) {
+    return res.status(400).json({ 
+      error: 'Error: Faltan campos obligatorios para procesar la inscripción de fútbol.' 
+    });
+  }
+
+  try {
+    const queryText = `
+      INSERT INTO alumnos_futbol (
+        nombre_alumno, 
+        edad_alumno, 
+        direccion, 
+        es_menor_edad, -- Campo fijo estructural
+        nombre_representante, 
+        cedula_representante, 
+        telefono_representante, 
+        nivel, 
+        horario_asignado,
+        registrado_el
+      ) 
+      VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, NOW());
+    `;
+
+    const values = [
+      nombre_alumno.trim(),
+      parseInt(edad_alumno, 10),
+      direccion.trim(),
+      nombre_representante.trim(),
+      cedula_representante.trim(),
+      telefono_representante.trim(),
+      nivel.trim(),            // Captura el valor de la Categoría (Sub-X)
+      horario_asignado.trim()  // Captura la cadena unificada de días/horas
+    ];
+
+    // Ejecución de la consulta en tu pool unificado de Aiven
+    await pool.query(queryText, values);
+
+    return res.status(201).json({
+      mensaje: '¡Atleta de fútbol registrado en la nube de Aiven con éxito! ⚽'
+    });
+
+  } catch (error) {
+    console.error('❌ Error al insertar atleta de fútbol en MySQL:', error);
+    return res.status(500).json({ 
+      error: 'Error interno en el servidor al guardar la matrícula de fútbol.' 
+    });
+  }
+});
+
 module.exports = router;

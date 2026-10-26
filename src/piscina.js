@@ -662,22 +662,11 @@ router.post('/eventos', async (req, res) => {
     return res.status(500).json({ error: 'Error interno al guardar la reserva.' });
   }
 });
-
-// 2. GET: Obtener el cronograma de todos los alquileres agendados
-router.get('/eventos', async (req, res) => {
-  try {
-    const [rows] = await pool.query('SELECT * FROM eventos_alquiler ORDER BY fecha ASC, hora_inicio ASC');
-    return res.status(200).json(rows);
-  } catch (error) {
-    console.error('❌ Error al consultar cronograma:', error);
-    return res.status(500).json({ error: 'Error al cargar la agenda de eventos.' });
-  }
-});
-
 // 3. GET: Generar y descargar el contrato legal en formato PDF vectorizado con Cintillo Premium
 router.get('/eventos/:id/pdf', async (req, res) => {
   const { id } = req.params;
-  const path = require('path'); // Asegúrate de tener importado path para ubicar el WebP
+  const path = require('path');
+  const fs = require('fs'); // IMPORTANTE: Requerimos el módulo del sistema de archivos
 
   try {
     // Buscamos el evento exacto en la base de datos de Aiven
@@ -690,7 +679,23 @@ router.get('/eventos/:id/pdf', async (req, res) => {
     const evento = rows[0];
     const fechaFormateada = new Date(evento.fecha).toISOString().substring(0, 10);
 
-    // Configuración de cabeceras HTTP para forzar la descarga o apertura del PDF nativo
+    // 🌟 ENGRANAJE DE SEGURIDAD ABSOLUTO:
+    // Leemos la imagen como un Buffer de memoria en caliente antes de inicializar PDFKit.
+    // Esto elimina los micro-tiempos de lectura asíncrona del disco de Render.
+    const rutaCintillo = path.join(__dirname, '../../public/cintillo.webp');
+    let cintilloBuffer = null;
+    
+    try {
+      if (fs.existsSync(rutaCintillo)) {
+        cintilloBuffer = fs.readFileSync(rutaCintillo); // Lectura síncrona ultra veloz
+      } else {
+        console.warn(`⚠️ Advertencia: No se encontró el cintillo en la ruta: ${rutaCintillo}`);
+      }
+    } catch (errImg) {
+      console.error('Error cargando el archivo de imagen corporativa:', errImg.message);
+    }
+
+    // Configuración de cabeceras HTTP para apertura nativa
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=Contrato_Alquiler_LosPinos_${id}.pdf`);
 
@@ -698,17 +703,16 @@ router.get('/eventos/:id/pdf', async (req, res) => {
     const doc = new PDFDocument({ margin: 50, size: 'LETTER' });
     doc.pipe(res); // Canaliza el flujo de bytes directo a la respuesta HTTP de Render
 
-    // =========================================================================
-    // 📄 INYECCIÓN DEL CINTILLO CORPORATIVO (Optimizado en .webp)
-    // =========================================================================
-    // Buscamos el archivo directamente en tu carpeta public del proyecto
-    const rutaCintillo = path.join(__dirname, '../../public/cintillo.webp');
-    
-    // Dibujamos el cintillo arriba ajustado al ancho disponible (512 puntos entre márgenes de 50)
-    doc.image(rutaCintillo, 50, 40, { width: 512 });
-    
-    // Posicionamos el cursor de dibujo justo debajo del cintillo insertado
-    doc.y = 95; 
+    // 📄 INYECCIÓN EN MEMORIA DEL CINTILLO CORPORATIVO
+    if (cintilloBuffer) {
+      // Pasamos el Buffer directamente, eliminando lecturas asíncronas colisionadas
+      doc.image(cintilloBuffer, 50, 40, { width: 512 });
+      doc.y = 95;
+    } else {
+      // Fallback seguro en texto por si borras la imagen por error para que no se quede en blanco
+      doc.y = 40;
+      doc.fontSize(14).font('Helvetica-Bold').fillColor('#047857').text('COMPLEJO DEPORTIVO RECREACIONAL LOS PINOS', { align: 'center' });
+    }
     
     doc.fontSize(9).font('Helvetica').fillColor('#475569').text('Control de Alquileres de Áreas Especiales y Piscina', { align: 'center' });
     doc.text('Mérida, Venezuela · Soporte Corporativo', { align: 'center' });
@@ -747,7 +751,7 @@ router.get('/eventos/:id/pdf', async (req, res) => {
     doc.text(`Canon de Arrendamiento:       $${parseFloat(evento.monto_dolares).toFixed(2)} USD`);
     doc.text(`Tasa Cambiaria BCV:               ${parseFloat(evento.tasa_bcv).toFixed(2)} VES por 1 USD`);
     doc.text(`Total en Moneda Nacional:    Bs. ${parseFloat(evento.monto_bolivares).toFixed(2)} VES`);
-    doc.text(`Estatus del Pago:                     ${evento.estatus === 'Liquidado' ? ' LIQUIDADO / CANCELADO COMPLETAMENTE' : 'APARTADO (Requiele completar saldo al ingresar)'}`);
+    doc.text(`Estatus del Pago:                     ${evento.estatus === 'Liquidado' ? ' LIQUIDADO / CANCELADO COMPLETAMENTE' : 'APARTADO (Requiere completar saldo al ingresar)'}`);
     doc.moveDown(1.2);
 
     // 📝 SECCIÓN DE OBSERVACIONES PARTICULARES
@@ -758,7 +762,7 @@ router.get('/eventos/:id/pdf', async (req, res) => {
       doc.moveDown(1.2);
     }
 
-        // ⚖️ CLÁUSULAS LEGALES ESTÁNDAR COMPLEJO LOS PINOS
+    // ⚖️ CLÁUSULAS LEGALES ESTÁNDAR COMPLEJO LOS PINOS
     doc.fontSize(11).font('Helvetica-Bold').fillColor('#0f172a').text('5. CLÁUSULAS DE SEGURIDAD Y RESPONSABILIDAD', { underline: true });
     doc.moveDown(0.4);
     doc.fontSize(8.5).font('Helvetica').fillColor('#475569');
@@ -770,7 +774,6 @@ router.get('/eventos/:id/pdf', async (req, res) => {
       "CUARTA: Las horas extras que excedan el tiempo estipulado en la sección (2) tendrán un recargo de $30 USD por hora fraccionada."
     ];
     
-    // Imprimimos de manera síncrona cada cláusula
     clausulas.forEach(c => {
       doc.text(c, { width: 512, align: 'justify' });
       doc.moveDown(0.2);
@@ -779,36 +782,30 @@ router.get('/eventos/:id/pdf', async (req, res) => {
     // =========================================================================
     // ✍️ BLOQUE DE FIRMAS BLINDADO EN EL MARGEN INFERIOR (Estilo Footer)
     // =========================================================================
-    // 1. Desactivamos el salto automático para anclar las firmas al fondo de la hoja actual de forma segura
     doc.options.autoPageBreak = false;
-    
-    // 2. Establecemos la coordenada fija de dibujo en la base vertical de la hoja
     const yFirma = 660;
     
-    // Dibujamos las líneas vectoriales de las firmas
     doc.strokeColor('#cbd5e1').lineWidth(0.5).moveTo(80, yFirma).lineTo(220, yFirma).stroke();
     doc.strokeColor('#cbd5e1').lineWidth(0.5).moveTo(340, yFirma).lineTo(480, yFirma).stroke();
     
-    // Inyectamos los textos explicativos debajo de cada línea indicando las coordenadas "X" e "Y" exactas
     doc.fontSize(9).font('Helvetica-Bold').fillColor('#334155');
     doc.text('Por el Complejo Los Pinos', 80, yFirma + 8, { width: 140, align: 'center' });
     doc.text('Firma del Responsable', 340, yFirma + 8, { width: 140, align: 'center' });
 
-    // 3. Volvemos a encender la opción estándar por consistencia del lienzo
     doc.options.autoPageBreak = true;
 
-    // ⚠️ 4. CRUCIAL: Ejecutamos el cierre del documento como el paso final absoluto
-    // Esto previene que PDFKit intente inyectar datos en un stream ya destruido
+    // 🚀 AL FIN SEGURO: El documento cierra sabiendo que la imagen ya se grabó por completo
     doc.end();
     
   } catch (error) {
     console.error('❌ Error crítico en generación vectorial del PDF:', error);
-    // Blindaje: Si el error ocurre y las cabeceras aún no se han enviado, responde con estatus seguro
     if (!res.headersSent) {
       return res.status(500).send('Error interno del servidor al procesar el archivo imprimible.');
     }
   }
 });
+
+
 
 // ENDPOINT: Registrar la asistencia diaria de todo un turno en bloque masivo
 router.post('/asistencia-diaria', async (req, res) => {

@@ -211,61 +211,59 @@ router.get('/reporte-general', async (req, res) => {
     
     const [rows] = await pool.query(querySQL);
     
-    // 2. Calcular Totales Consolidados según las directrices del método de pago
-    let totalDolares = 0;
-    let totalBolivares = 0;
+    // 2. Calcular Totales Consolidados con la lógica corregida
+    let totalDolaresEfectivo = 0;
+    let totalBolivaresBancos = 0;
     const totalTransacciones = rows.length;
 
     rows.forEach(pago => {
       const metodo = pago.metodo_pago ? pago.metodo_pago.toLowerCase().trim() : '';
       
       if (metodo === 'efectivo') {
-        // Si el pago es en efectivo se refleja en la billetera de Bolívares
-        totalBolivares += parseFloat(pago.monto_bolivares || 0);
+        // REGLA CORREGIDA: Si es efectivo, se suma directo a la billetera física de Dólares (USD)
+        totalDolaresEfectivo += parseFloat(pago.monto_dolares || 0);
       } else {
-        // Si es pago móvil o transferencia se refleja en la billetera de Divisas (USD)
-        totalDolares += parseFloat(pago.monto_dolares || 0);
+        // REGLA CORREGIDA: Si es pago móvil o transferencia, se suma a la recaudación bancaria en Bolívares (VES)
+        totalBolivaresBancos += parseFloat(pago.monto_bolivares || 0);
       }
     });
 
-    // Cabeceras HTTP para abrir el PDF nativo
+    // Cabeceras HTTP anti-caché óptimas para dispositivos móviles
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'inline; filename=Balance_General_Caja_Piscina.pdf');
-
-    // Control total anti-caché para navegadores móviles
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
 
-    // Inicializas tu lienzo de PDFKit
+    // Inicialización del lienzo horizontal (Landscape)
     const doc = new PDFDocument({ size: 'LETTER', layout: 'landscape', margin: 40 });
     doc.pipe(res);
 
     // Banner Principal
     doc.rect(40, 40, 712, 50).fill('#0f172a');
     doc.fillColor('#ffffff').fontSize(14).font('Helvetica-Bold').text('REPORTE GENERAL DE INGRESOS Y AUDITORÍA DE CAJA', 55, 50);
-    doc.fontSize(8).font('Helvetica-Oblique').text(`Consolidado del Sistema Financiero | Generado: ${new Date().toLocaleString()}`, 55, 68);
+    doc.fontSize(8).font('Helvetica-Oblique').text(`Consolidado del Sistema Financiero Los Pinos | Generado: ${new Date().toLocaleString()}`, 55, 68);
 
-    // --- Tarjetas Informativas Con Correciones de Recaudación Real ---
+    // --- Tarjetas Informativas Corregidas y Saneadas ---
     let boxWidth = 224;
     let boxY = 105;
 
-    // Caja 1: Bancos (Pago Móvil / Transferencia)
+    // Caja 1: Efectivo en Divisas (USD)
     doc.rect(40, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
-    doc.fillColor('#475569').fontSize(7).font('Helvetica-Bold').text('TOTAL DIVISAS EN BANCARIAS (USD)', 50, boxY + 10);
-    doc.fillColor('#0f172a').fontSize(14).font('Helvetica-Bold').text(`$ ${totalDolares.toFixed(2)}`, 50, boxY + 22);
+    doc.fillColor('#475569').fontSize(7).font('Helvetica-Bold').text('TOTAL DIVISAS EN EFECTIVO (USD)', 50, boxY + 10);
+    doc.fillColor('#0f172a').fontSize(14).font('Helvetica-Bold').text(`$ ${totalDolaresEfectivo.toFixed(2)}`, 50, boxY + 22);
 
-    // Caja 2: Efectivo Recaudado
+    // Caja 2: Recaudación Bancaria / Medios Electrónicos (VES)
     doc.rect(40 + boxWidth + 20, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
-    doc.fillColor('#059669').fontSize(7).font('Helvetica-Bold').text('TOTAL RECAUDADO EN EFECTIVO (VES)', 40 + boxWidth + 30, boxY + 10);
-    doc.fillColor('#047857').fontSize(14).font('Helvetica-Bold').text(`${totalBolivares.toFixed(2)} VES`, 40 + boxWidth + 30, boxY + 22);
+    doc.fillColor('#059669').fontSize(7).font('Helvetica-Bold').text('TOTAL RECAUDADO EN BANCARIAS (VES)', 40 + boxWidth + 30, boxY + 10);
+    doc.fillColor('#047857').fontSize(14).font('Helvetica-Bold').text(`${totalBolivaresBancos.toFixed(2)} VES`, 40 + boxWidth + 30, boxY + 22);
 
-    // Caja 3: Comprobantes
+    // Caja 3: Volumen de Transacciones
     doc.rect(40 + (boxWidth * 2) + 40, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
     doc.fillColor('#475569').fontSize(7).font('Helvetica-Bold').text('COMPROBANTES TOTALES EMITIDOS', 40 + (boxWidth * 2) + 50, boxY + 10);
     doc.fillColor('#0f172a').fontSize(14).font('Helvetica-Bold').text(`${totalTransacciones} Transacciones`, 40 + (boxWidth * 2) + 50, boxY + 22);
 
-    // --- Tabla General Ajustada para Referencias ---
+    // --- Estructura de la Tabla General ---
     let y = 170;
     doc.fillColor('#1e293b').fontSize(10).font('Helvetica-Bold').text('DETALLE INDIVIDUAL DE MOVIMIENTOS A CAJA', 40, y);
     y += 15;
@@ -280,7 +278,6 @@ router.get('/reporte-general', async (req, res) => {
     doc.text('Método', 480, y + 6, { width: 60 });
     doc.text('Monto ($)', 550, y + 6, { width: 55, align: 'right' });
     doc.text('Monto (Bs.)', 615, y + 6, { width: 75, align: 'right' });
-    // Modificación: Reemplazo de columna Origen por Referencia
     doc.text('Referencia', 700, y + 6, { width: 50, align: 'center' });
     
     y += 20;
@@ -288,7 +285,7 @@ router.get('/reporte-general', async (req, res) => {
     doc.font('Helvetica').fontSize(8).fillColor('#0f172a');
     
     rows.forEach((pago, index) => {
-      // 🌟 SOLUCIÓN AL SALTO: Detenemos la grilla en 490 para salvaguardar el pie de página
+      // Control de salto de página seguro a los 490 puntos
       if (y > 490) { 
         doc.addPage({ size: 'LETTER', layout: 'landscape', margin: 40 }); 
         y = 40; 
@@ -302,10 +299,14 @@ router.get('/reporte-general', async (req, res) => {
       const fechaFormateada = new Date(pago.fecha_registro).toLocaleDateString();
       const metodoTexto = pago.metodo_pago ? pago.metodo_pago.toUpperCase() : '';
       
-      // Control lógico del texto de la referencia bancaria
+      // LÓGICA CORREGIDA PARA LAS COLUMNAS DINÁMICAS
       let refTexto = 'N/A';
-      if (metodoTexto !== 'EFECTIVO' && pago.referencia) {
-        refTexto = pago.referencia;
+      let montoBsTexto = 'N/A';
+
+      if (metodoTexto !== 'EFECTIVO') {
+        // Si es pago digital, inyectamos la referencia y el monto formateado en bolívares
+        if (pago.referencia) refTexto = pago.referencia;
+        montoBsTexto = `${parseFloat(pago.monto_bolivares || 0).toFixed(2)}`;
       }
 
       doc.text(`#${pago.id}`, 45, y + 5, { width: 45 });
@@ -315,15 +316,16 @@ router.get('/reporte-general', async (req, res) => {
       doc.text(fechaFormateada, 405, y + 5, { width: 65 });
       doc.text(metodoTexto, 480, y + 5, { width: 60 });
       doc.text(`$${parseFloat(pago.monto_dolares || 0).toFixed(2)}`, 550, y + 5, { width: 55, align: 'right' });
-      doc.text(`${parseFloat(pago.monto_bolivares || 0).toFixed(2)}`, 615, y + 5, { width: 75, align: 'right' });
-      // Inyección de los 4 dígitos limpios en su propia columna sin solaparse
+      
+      // Renderizado del monto en Bs. (Muestra la cifra o un "N/A" limpio centrado/alineado)
+      doc.text(montoBsTexto, 615, y + 5, { width: 75, align: 'right' });
       doc.text(refTexto, 700, y + 5, { width: 50, align: 'center' });
 
       doc.strokeColor('#f1f5f9').lineWidth(0.5).moveTo(40, y + 18).lineTo(752, y + 18).stroke();
       y += 18;
     });
 
-    // 🌟 SECCIÓN BLINDADA CONTRA HOJAS EN BLANCO HUÉRFANAS
+    // Control anti-salto de página para evitar hojas huérfanas
     doc.options.autoPageBreak = false;
     doc.strokeColor('#0f172a').lineWidth(1).moveTo(40, 540).lineTo(752, 540).stroke();
     doc.fillColor('#94a3b8').fontSize(7).text('Reporte de Auditoría Central Interno - Desarrollado bajo especificaciones de resiliencia Offline-First.', 40, 550);

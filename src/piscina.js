@@ -193,7 +193,6 @@ router.get('/dashboard', async (req, res) => {
     return res.status(500).json({ error: 'Error al procesar el reporte de caja.' });
   }
 });
-
 router.get('/reporte-general', async (req, res) => {
   const PDFDocument = require('pdfkit'); // Asegura que esté importado al inicio o aquí
   
@@ -277,7 +276,8 @@ router.get('/reporte-general', async (req, res) => {
     doc.font('Helvetica').fontSize(8).fillColor('#0f172a');
     
     rows.forEach((pago, index) => {
-      if (y > 510) { 
+      // 🌟 SOLUCIÓN AL SALTO: Reducimos el límite de corte a 490 puntos para salvaguardar el pie de página
+      if (y > 490) { 
         doc.addPage({ size: 'LETTER', layout: 'landscape', margin: 40 }); 
         y = 40; 
       }
@@ -304,9 +304,20 @@ router.get('/reporte-general', async (req, res) => {
       y += 18;
     });
 
-    doc.strokeColor('#0f172a').lineWidth(1).moveTo(40, 560).lineTo(752, 560).stroke();
-    doc.fillColor('#94a3b8').fontSize(7).text('Reporte de Auditoría Central Interno - Desarrollado bajo especificaciones de resiliencia Offline-First.', 40, 568);
+    // =========================================================================
+    // 🌟 SECCIÓN BLINDADA CONTRA HOJAS EN BLANCO EN EL MARGEN INFERIOR
+    // =========================================================================
+    // 1. Apagamos el salto automático para forzar el dibujado en la hoja actual
+    doc.options.autoPageBreak = false;
 
+    // 2. Trazamos la línea y el texto comprimidos un poco más arriba (coordenadas 540 y 550)
+    doc.strokeColor('#0f172a').lineWidth(1).moveTo(40, 540).lineTo(752, 540).stroke();
+    doc.fillColor('#94a3b8').fontSize(7).text('Reporte de Auditoría Central Interno - Desarrollado bajo especificaciones de resiliencia Offline-First.', 40, 550);
+
+    // 3. Volvemos a encender el salto automático por consistencia del lienzo
+    doc.options.autoPageBreak = true;
+
+    // Finalizar el documento de forma secuencial y limpia
     doc.end();
 
   } catch (error) {
@@ -314,6 +325,7 @@ router.get('/reporte-general', async (req, res) => {
     return res.status(500).send('Error interno del servidor al procesar el archivo imprimible.');
   }
 });
+
 
 
 

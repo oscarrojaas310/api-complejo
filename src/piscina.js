@@ -956,8 +956,6 @@ router.delete('/asistencia-eliminar', async (req, res) => {
 });
 
 
-
-
 // POST: Registrar matrícula de alumno en la Academia de Fútbol Menor
 router.post('/futbol/inscripciones', async (req, res) => {
   const {
@@ -967,12 +965,14 @@ router.post('/futbol/inscripciones', async (req, res) => {
     nombre_representante,
     cedula_representante,
     telefono_representante,
+    patologia, // 🌟 NUEVO CAMPO MÉDICO INTEGRADO
     nivel,
     horario_asignado
   } = req.body;
 
   // 🛡️ VALIDACIÓN ESTRICTA EN EL SERVIDOR CENTRAL:
   // Verificamos la existencia de todos los campos obligatorios del menor y su representante
+  // (El campo patologia no se incluye aquí para permitir que se envíe vacío si está sano)
   if (
     !nombre_alumno || 
     !edad_alumno || 
@@ -997,13 +997,17 @@ router.post('/futbol/inscripciones', async (req, res) => {
         es_menor_edad, -- Campo fijo estructural
         nombre_representante, 
         cedula_representante, 
-        telefono_representante, 
+        telefono_representante,
+        patologia,     -- Columna médica integrada
         nivel, 
         horario_asignado,
         registrado_el
       ) 
-      VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, NOW());
+      VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, NOW());
     `;
+
+    // 🛡️ SALVAVIDAS FINANCIERO/MÉDICO: Si viene vacío, guardamos 'Ninguna' por orden de auditoría
+    const patologiaLimpia = patologia && patologia.trim() ? patologia.trim() : 'Ninguna';
 
     const values = [
       nombre_alumno.trim(),
@@ -1012,7 +1016,8 @@ router.post('/futbol/inscripciones', async (req, res) => {
       nombre_representante.trim(),
       cedula_representante.trim(),
       telefono_representante.trim(),
-      nivel.trim(),            // Captura el valor de la Categoría (Sub-X)
+      patologiaLimpia,
+      nivel.trim(),            // Captura el valor de la Categoría (Sub-6, Sub-8, etc.)
       horario_asignado.trim()  // Captura la cadena unificada de días/horas
     ];
 
@@ -1030,5 +1035,7 @@ router.post('/futbol/inscripciones', async (req, res) => {
     });
   }
 });
+
+
 
 module.exports = router;

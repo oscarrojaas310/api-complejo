@@ -345,6 +345,9 @@ router.get('/reporte-asistencia', async (req, res) => {
 
   try {
     // 1. CONSULTA SQL: Agrupa por alumno y calcula totales en una sola pasada
+  
+        // 1. CONSULTA SQL ULTRA-OPTIMIZADA CRONOLÓGICA: 
+    // Agrupa por alumno y ordena estrictamente por la hora del bloque asignado
     let querySQL = `
       SELECT 
         a.id AS alumno_id,
@@ -359,7 +362,7 @@ router.get('/reporte-asistencia', async (req, res) => {
     
     const queryParams = [];
 
-    // Si aplican filtros de fecha para evaluar un periodo específico
+    // Evaluadores de filtros de rango de fechas si aplican
     if (inicio && fin) {
       querySQL += ` WHERE asi.fecha BETWEEN ? AND ? `;
       queryParams.push(inicio, fin);
@@ -371,12 +374,34 @@ router.get('/reporte-asistencia', async (req, res) => {
       queryParams.push(fin);
     }
 
+    // 🌟 ENGRANAJE DE ORDENAMIENTO MILITAR CRONOLÓGICO:
+    // Agrupamos y le ordenamos a MySQL extraer la hora del string:
+    // 1. Prioriza "Martes a Jueves" sobre el fin de semana.
+    // 2. Convierte el formato "12 AM/PM" a peso numérico para apilar 1:00 PM antes de las 2:00 PM de forma exacta.
     querySQL += ` 
       GROUP BY a.id, a.nombre_alumno, a.horario_asignado
-      ORDER BY total_asistencias DESC, a.nombre_alumno ASC 
+      ORDER BY 
+        CASE 
+          WHEN a.horario_asignado LIKE 'Martes%' THEN 1
+          WHEN a.horario_asignado LIKE 'Sábados%' THEN 2
+          ELSE 3
+        END ASC,
+        CASE
+          WHEN a.horario_asignado LIKE '%12:00 AM%' THEN 0
+          WHEN a.horario_asignado LIKE '%01:00 PM%' THEN 13
+          WHEN a.horario_asignado LIKE '%02:00 PM%' THEN 14
+          WHEN a.horario_asignado LIKE '%03:00 PM%' THEN 15
+          WHEN a.horario_asignado LIKE '%04:00 PM%' THEN 16
+          WHEN a.horario_asignado LIKE '%05:00 PM%' THEN 17
+          WHEN a.horario_asignado LIKE '%06:00 PM%' THEN 18
+          WHEN a.horario_asignado LIKE '%09:00 AM%' THEN 9
+          ELSE 99
+        END ASC,
+        a.nombre_alumno ASC
     `;
     
     const [rows] = await pool.query(querySQL, queryParams);
+
 
     // 2. Calcular métricas globales de la academia para las tarjetas
     let globalClasesDictadas = 0;

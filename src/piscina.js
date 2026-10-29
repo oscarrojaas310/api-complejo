@@ -1121,22 +1121,23 @@ router.get('/asistencia-detalle', async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 });
-
 // POST: Registrar matrícula de alumno en la Academia de Fútbol Menor
 router.post('/futbol/inscripciones', async (req, res) => {
   const {
     nombre_alumno,
     edad_alumno,
+    cedula_alumno, // 🌟 NUEVO CAMPO RECIBIDO
     direccion,
     nombre_representante,
     cedula_representante,
     telefono_representante,
-    patologia, // 🌟 NUEVO CAMPO MÉDICO INTEGRADO
+    patologia,
     nivel,
     horario_asignado
   } = req.body;
 
-  // (El campo patologia no se incluye aquí para permitir que se envíe vacío si está sano)
+  // 🛡️ VALIDACIÓN ESTRICTA EN EL SERVIDOR CENTRAL:
+  // (Dejamos por fuera cedula_alumno y patologia por ser opcionales con fallback)
   if (
     !nombre_alumno || 
     !edad_alumno || 
@@ -1157,35 +1158,37 @@ router.post('/futbol/inscripciones', async (req, res) => {
       INSERT INTO alumnos_futbol (
         nombre_alumno, 
         edad_alumno, 
+        cedula_alumno, -- Columna inyectada
         direccion, 
-        es_menor_edad, -- Campo fijo estructural
+        es_menor_edad, 
         nombre_representante, 
         cedula_representante, 
         telefono_representante,
-        patologia,     -- Columna médica integrada
+        patologia,
         nivel, 
         horario_asignado,
         registrado_el
       ) 
-      VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, NOW());
+      VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, NOW());
     `;
 
-    // 🛡️ SALVAVIDAS FINANCIERO/MÉDICO: Si viene vacío, guardamos 'Ninguna' por orden de auditoría
+    // CONTINGENCIAS FORMALES: Evitamos celdas vacías o nulas en tu base de datos
+    const cedulaAlumnoLimpia = cedula_alumno && cedula_alumno.trim() ? cedula_alumno.trim().toUpperCase() : 'N/A';
     const patologiaLimpia = patologia && patologia.trim() ? patologia.trim() : 'Ninguna';
 
     const values = [
       nombre_alumno.trim(),
       parseInt(edad_alumno, 10),
+      cedulaAlumnoLimpia,
       direccion.trim(),
       nombre_representante.trim(),
       cedula_representante.trim(),
       telefono_representante.trim(),
       patologiaLimpia,
-      nivel.trim(),            // Captura el valor de la Categoría (Sub-6, Sub-8, etc.)
-      horario_asignado.trim()  // Captura la cadena unificada de días/horas
+      nivel.trim(),
+      horario_asignado.trim()
     ];
 
-    // Ejecución de la consulta en tu pool unificado de Aiven
     await pool.query(queryText, values);
 
     return res.status(201).json({
@@ -1199,7 +1202,5 @@ router.post('/futbol/inscripciones', async (req, res) => {
     });
   }
 });
-
-
 
 module.exports = router;

@@ -1126,7 +1126,8 @@ router.post('/futbol/inscripciones', async (req, res) => {
   const {
     nombre_alumno,
     edad_alumno,
-    cedula_alumno, // 🌟 NUEVO CAMPO RECIBIDO
+    fecha_nacimiento, // 🌟 NUEVO CAMPO CRÍTICO RECIBIDO
+    cedula_alumno,
     direccion,
     nombre_representante,
     cedula_representante,
@@ -1137,10 +1138,10 @@ router.post('/futbol/inscripciones', async (req, res) => {
   } = req.body;
 
   // 🛡️ VALIDACIÓN ESTRICTA EN EL SERVIDOR CENTRAL:
-  // (Dejamos por fuera cedula_alumno y patologia por ser opcionales con fallback)
   if (
     !nombre_alumno || 
     !edad_alumno || 
+    !fecha_nacimiento || // Requerido obligatorio
     !direccion || 
     !nombre_representante || 
     !cedula_representante || 
@@ -1158,7 +1159,8 @@ router.post('/futbol/inscripciones', async (req, res) => {
       INSERT INTO alumnos_futbol (
         nombre_alumno, 
         edad_alumno, 
-        cedula_alumno, -- Columna inyectada
+        fecha_nacimiento, -- Columna cronológica inyectada
+        cedula_alumno, 
         direccion, 
         es_menor_edad, 
         nombre_representante, 
@@ -1169,7 +1171,7 @@ router.post('/futbol/inscripciones', async (req, res) => {
         horario_asignado,
         registrado_el
       ) 
-      VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, NOW());
+      VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, NOW());
     `;
 
     // CONTINGENCIAS FORMALES: Evitamos celdas vacías o nulas en tu base de datos
@@ -1179,6 +1181,7 @@ router.post('/futbol/inscripciones', async (req, res) => {
     const values = [
       nombre_alumno.trim(),
       parseInt(edad_alumno, 10),
+      fecha_nacimiento, // Se envía la cadena "YYYY-MM-DD" directamente a MySQL
       cedulaAlumnoLimpia,
       direccion.trim(),
       nombre_representante.trim(),

@@ -1051,26 +1051,34 @@ router.get('/asistencia-previa', async (req, res) => {
   }
 });
 
-// 3. ENDPOINT: Libro de Actas Continuo de Asistencias (Historial completo controlado por el Administrador)
+// 3. ENDPOINT: Monitoreo Automatizado de Asistencias de la Semana Actual (Limpieza automática los Lunes)
 router.get('/asistencia-resumen-semanal', async (req, res) => {
   try {
     const querySQL = `
       SELECT 
         horario,
-        fecha AS fecha_iso, -- Entrega el formato original YYYY-MM-DD
+        fecha AS fecha_iso, 
         DATE_FORMAT(fecha, '%d/%m/%Y') AS fecha_corta,
         SUM(CASE WHEN asistio = 1 THEN 1 ELSE 0 END) AS presentes,
         SUM(CASE WHEN asistio = 0 THEN 1 ELSE 0 END) AS ausentes
       FROM asistencias
-      -- 🔍 MODIFICADO: Eliminamos la regla "WHERE YEARWEEK..." para mostrar todo el historial acumulado
+      -- 🌟 ENGRANAJE ANTI-CACHÉ SEMANAL: Filtra de forma estricta los días de la semana en curso
+      -- El parámetro '1' le indica a MySQL que el ciclo arranca los días Lunes.
+      WHERE YEARWEEK(fecha, 1) = YEARWEEK(NOW(), 1)
       GROUP BY horario, fecha
       ORDER BY fecha DESC, horario ASC
-      LIMIT 100 -- 🛡️ BLINDAJE: Muestra los últimos 100 turnos pasados para no saturar la memoria del teléfono
     `;
+    
     const [rows] = await pool.query(querySQL);
+    
+    // Cabeceras HTTP anti-caché robustas para navegadores móviles
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
     return res.status(200).json(rows);
   } catch (error) {
-    console.error('Error al generar el historial continuo de asistencia:', error);
+    console.error('❌ Error al generar el historial dinámico de asistencia:', error);
     return res.status(500).json({ error: error.message });
   }
 });
@@ -1098,42 +1106,6 @@ router.get('/asistencia-detalle', async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 });
-// 5. ENDPOINT BLINDADO: Eliminar reporte con limpieza atómica de fechas ISO
-router.delete('/asistencia-eliminar', async (req, res) => {
-  const { fecha, horario } = req.query;
-
-  if (!fecha || !horario) {
-    return res.status(400).json({ error: 'Los parámetros fecha y horario son obligatorios.' });
-  }
-
-  try {
-    // 🛡️ LIMPIEZA ATÓMICA DE FECHA:
-    // Si viene como "2026-10-23T00:00:00.000Z", extrae solo los primeros 10 caracteres "2026-10-23"
-    const fechaLimpia = fecha.includes('T') ? fecha.split('T')[0] : fecha;
-    const horarioLimpio = horario.trim();
-
-    console.log(`⏳ Intentando borrar asistencia para el día [${fechaLimpia}] turno [${horarioLimpio}]...`);
-
-    // Consulta flexible con LIKE para los prefijos de los días
-    const querySQL = 'DELETE FROM asistencias WHERE fecha = ? AND horario LIKE ?';
-    const [result] = await pool.query(querySQL, [fechaLimpia, `%${horarioLimpio}%`]);
-
-    console.log(`🗑️ Historial eliminado con éxito en la red. Filas afectadas: ${result.affectedRows}`);
-    
-    return res.status(200).json({ 
-      mensaje: 'Registro de asistencia eliminado correctamente.',
-      filas_borradas: result.affectedRows 
-    });
-
-  } catch (error) {
-    console.error('❌ Error crítico al eliminar asistencia en la base de datos:', error);
-    return res.status(500).json({ 
-      error: 'Error interno en el servidor de base de datos.',
-      detalle: error.message 
-    });
-  }
-});
-
 
 // POST: Registrar matrícula de alumno en la Academia de Fútbol Menor
 router.post('/futbol/inscripciones', async (req, res) => {
@@ -1149,8 +1121,6 @@ router.post('/futbol/inscripciones', async (req, res) => {
     horario_asignado
   } = req.body;
 
-  // 🛡️ VALIDACIÓN ESTRICTA EN EL SERVIDOR CENTRAL:
-  // Verificamos la existencia de todos los campos obligatorios del menor y su representante
   // (El campo patologia no se incluye aquí para permitir que se envíe vacío si está sano)
   if (
     !nombre_alumno || 

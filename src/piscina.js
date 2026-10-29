@@ -193,7 +193,6 @@ router.get('/dashboard', async (req, res) => {
     return res.status(500).json({ error: 'Error al procesar el reporte de caja.' });
   }
 });
-
 router.get('/reporte-general', async (req, res) => {
   const PDFDocument = require('pdfkit');
   
@@ -230,14 +229,21 @@ router.get('/reporte-general', async (req, res) => {
     // Ejecutamos la consulta pasándole los filtros cronológicos si aplican
     const [rows] = await pool.query(querySQL, queryParams);
     
-    // 2. Calcular Totales Consolidados basándose en los registros filtrados
-    let totalDolares = 0;
-    let totalBolivares = 0;
+    // 2. Calcular Totales Consolidados discriminando estrictamente los canales de caja
+    let totalDolaresEfectivo = 0;
+    let totalBolivaresBancos = 0;
     const totalTransacciones = rows.length;
 
     rows.forEach(pago => {
-      totalDolares += parseFloat(pago.monto_dolares || 0);
-      totalBolivares += parseFloat(pago.monto_bolivares || 0);
+      const metodo = pago.metodo_pago ? pago.metodo_pago.toLowerCase().trim() : '';
+      
+      if (metodo === 'efectivo') {
+        // REGLA OPERATIVA: El efectivo en divisas suma directo a la billetera física (USD)
+        totalDolaresEfectivo += parseFloat(pago.monto_dolares || 0);
+      } else {
+        // REGLA OPERATIVA: El pago móvil y transferencia alimentan la conciliación bancaria (VES)
+        totalBolivaresBancos += parseFloat(pago.monto_bolivares || 0);
+      }
     });
 
     res.setHeader('Content-Type', 'application/pdf');
@@ -257,18 +263,21 @@ router.get('/reporte-general', async (req, res) => {
     doc.fillColor('#ffffff').fontSize(14).font('Helvetica-Bold').text('REPORTE GENERAL DE INGRESOS Y AUDITORÍA DE CAJA', 55, 50);
     doc.fontSize(8).font('Helvetica-Oblique').text(`${subTextoRango} | Generado: ${new Date().toLocaleString()}`, 55, 68);
 
-    // --- Tarjetas Informativas Dinámicas ---
+    // --- Tarjetas Informativas Dinámicas Saneadas ---
     let boxWidth = 224;
     let boxY = 105;
 
+    // Caja 1: Efectivo Físico en Divisas
     doc.rect(40, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
     doc.fillColor('#475569').fontSize(7).font('Helvetica-Bold').text('TOTAL DIVISAS EN EFECTIVO (USD)', 50, boxY + 10);
-    doc.fillColor('#0f172a').fontSize(14).font('Helvetica-Bold').text(`$ ${totalDolares.toFixed(2)}`, 50, boxY + 22);
+    doc.fillColor('#0f172a').fontSize(14).font('Helvetica-Bold').text(`$ ${totalDolaresEfectivo.toFixed(2)}`, 50, boxY + 22);
 
+    // Caja 2: Medios Electrónicos Bancarios
     doc.rect(40 + boxWidth + 20, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
     doc.fillColor('#059669').fontSize(7).font('Helvetica-Bold').text('TOTAL RECAUDADO EN BOLÍVARES (VES)', 40 + boxWidth + 30, boxY + 10);
-    doc.fillColor('#047857').fontSize(14).font('Helvetica-Bold').text(`${totalBolivares.toFixed(2)} VES`, 40 + boxWidth + 30, boxY + 22);
+    doc.fillColor('#047857').fontSize(14).font('Helvetica-Bold').text(`${totalBolivaresBancos.toFixed(2)} VES`, 40 + boxWidth + 30, boxY + 22);
 
+    // Caja 3: Transacciones Emitidas
     doc.rect(40 + (boxWidth * 2) + 40, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
     doc.fillColor('#475569').fontSize(7).font('Helvetica-Bold').text('COMPROBANTES TOTALES EMITIDOS', 40 + (boxWidth * 2) + 50, boxY + 10);
     doc.fillColor('#0f172a').fontSize(14).font('Helvetica-Bold').text(`${totalTransacciones} Transacciones`, 40 + (boxWidth * 2) + 50, boxY + 18);
@@ -306,15 +315,21 @@ router.get('/reporte-general', async (req, res) => {
 
       const fechaFormateada = new Date(pago.fecha_registro).toLocaleDateString();
       const procedencia = pago.guardado_offline ? 'OFFLINE' : 'RED';
+      const metodoTexto = pago.metodo_pago ? pago.metodo_pago.toUpperCase() : '';
+
+      // Saneado de la columna de bolívares para operaciones en efectivo
+      const montoBsTexto = metodoTexto === 'EFECTIVO' 
+        ? 'N/A' 
+        : `${parseFloat(pago.monto_bolivares || 0).toFixed(2)}`;
 
       doc.text(`#${pago.id}`, 45, y + 5, { width: 45 });
       doc.text(pago.nombre_alumno, 100, y + 5, { width: 140, ellipsis: true });
       doc.text(pago.cedula_representante || 'N/P', 250, y + 5, { width: 70 });
       doc.text(pago.mes_pagado, 330, y + 5, { width: 65 });
       doc.text(fechaFormateada, 405, y + 5, { width: 65 });
-      doc.text(pago.metodo_pago.toUpperCase(), 480, y + 5, { width: 60 });
+      doc.text(metodoTexto, 480, y + 5, { width: 60 });
       doc.text(`$${parseFloat(pago.monto_dolares || 0).toFixed(2)}`, 550, y + 5, { width: 55, align: 'right' });
-      doc.text(`${parseFloat(pago.monto_bolivares || 0).toFixed(2)}`, 615, y + 5, { width: 75, align: 'right' });
+      doc.text(montoBsTexto, 615, y + 5, { width: 75, align: 'right' });
       doc.text(procedencia, 700, y + 5, { width: 45, align: 'center' });
 
       doc.strokeColor('#f1f5f9').lineWidth(0.5).moveTo(40, y + 18).lineTo(752, y + 18).stroke();

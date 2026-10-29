@@ -336,6 +336,163 @@ router.get('/reporte-general', async (req, res) => {
   }
 });
 
+// =========================================================================
+// 📊 NUEVO ENDPOINT: Generar y descargar el reporte general de asistencia
+// =========================================================================
+router.get('/reporte-asistencia', async (req, res) => {
+  const PDFDocument = require('pdfkit');
+  const { inicio, fin } = req.query; // Interceptamos los filtros opcionales de fecha
+
+  try {
+    // 1. CONSULTA SQL: Agrupa por alumno y calcula totales en una sola pasada
+    let querySQL = `
+      SELECT 
+        a.id AS alumno_id,
+        a.nombre_alumno,
+        a.horario_asignado,
+        COUNT(asi.id) AS clases_totales,
+        SUM(CASE WHEN asi.asistio = 1 THEN 1 ELSE 0 END) AS total_asistencias,
+        SUM(CASE WHEN asi.asistio = 0 THEN 1 ELSE 0 END) AS total_inasistencias
+      FROM alumnos a
+      LEFT JOIN asistencias asi ON a.id = asi.alumno_id
+    `;
+    
+    const queryParams = [];
+
+    // Si aplican filtros de fecha para evaluar un periodo específico
+    if (inicio && fin) {
+      querySQL += ` WHERE asi.fecha BETWEEN ? AND ? `;
+      queryParams.push(inicio, fin);
+    } else if (inicio) {
+      querySQL += ` WHERE asi.fecha >= ? `;
+      queryParams.push(inicio);
+    } else if (fin) {
+      querySQL += ` WHERE asi.fecha <= ? `;
+      queryParams.push(fin);
+    }
+
+    querySQL += ` 
+      GROUP BY a.id, a.nombre_alumno, a.horario_asignado
+      ORDER BY total_asistencias DESC, a.nombre_alumno ASC 
+    `;
+    
+    const [rows] = await pool.query(querySQL, queryParams);
+
+    // 2. Calcular métricas globales de la academia para las tarjetas
+    let globalClasesDictadas = 0;
+    let globalAsistencias = 0;
+    let totalAtletasEvaluados = rows.length;
+
+    rows.forEach(row => {
+      globalClasesDictadas += parseInt(row.clases_totales || 0);
+      globalAsistencias += parseInt(row.total_asistencias || 0);
+    });
+
+    const porcentajeGlobal = globalClasesDictadas > 0 
+      ? ((globalAsistencias / globalClasesDictadas) * 100).toFixed(1) 
+      : "0.0";
+
+    // 3. Cabeceras HTTP óptimas para apertura nativa e inmunes al caché móvil
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename=Reporte_General_Asistencia_Piscina.pdf');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    // Inicializamos lienzo horizontal (Landscape)
+    const doc = new PDFDocument({ size: 'LETTER', layout: 'landscape', margin: 40 });
+    doc.pipe(res);
+
+    // Banner Principal
+    let subTexto = `Métricas de Rendimiento y Permanencia de Atletas`;
+    if (inicio && fin) subTexto = `Periodo evaluado: Desde ${inicio} hasta ${fin}`;
+
+    doc.rect(40, 40, 712, 50).fill('#0f172a');
+    doc.fillColor('#ffffff').fontSize(14).font('Helvetica-Bold').text('AUDITORÍA Y REPORTE GENERAL DE ASISTENCIA', 55, 50);
+    doc.fontSize(8).font('Helvetica-Oblique').text(`${subTexto} | Generado: ${new Date().toLocaleString()}`, 55, 68);
+
+    // --- Tarjetas de Resumen Estadístico ---
+    let boxWidth = 224;
+    let boxY = 105;
+
+    doc.rect(40, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
+    doc.fillColor('#475569').fontSize(7).font('Helvetica-Bold').text('NÓMINA DE ATLETAS EVALUADOS', 50, boxY + 10);
+    doc.fillColor('#0f172a').fontSize(14).font('Helvetica-Bold').text(`${totalAtletasEvaluados} Alumnos`, 50, boxY + 22);
+
+    doc.rect(40 + boxWidth + 20, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
+    doc.fillColor('#0284c7').fontSize(7).font('Helvetica-Bold').text('PORCENTAJE DE ASISTENCIA GLOBAL', 40 + boxWidth + 30, boxY + 10);
+    doc.fillColor('#0369a1').fontSize(14).font('Helvetica-Bold').text(`${porcentajeGlobal} %`, 40 + boxWidth + 30, boxY + 22);
+
+    doc.rect(40 + (boxWidth * 2) + 40, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
+    doc.fillColor('#475569').fontSize(7).font('Helvetica-Bold').text('TOTAL INTERACCIONES CONTROLADAS (CHECKS)', 40 + (boxWidth * 2) + 50, boxY + 10);
+    doc.fillColor('#0f172a').fontSize(14).font('Helvetica-Bold').text(`${globalClasesDictadas} Fichas`, 40 + (boxWidth * 2) + 50, boxY + 22);
+
+    // --- Tabla General de Rendimiento ---
+    let y = 170;
+    doc.fillColor('#1e293b').fontSize(10).font('Helvetica-Bold').text('MÉTRICAS DE RENDIMIENTO INDIVIDUAL POR ATLETA', 40, y);
+    y += 15;
+
+    doc.rect(40, y, 712, 20).fill('#e2e8f0');
+    doc.fillColor('#334155').font('Helvetica-Bold').fontSize(8);
+    doc.text('ID Alumno', 45, y + 6, { width: 50 });
+    doc.text('Nombre Completo del Atleta', 105, y + 6, { width: 180 });
+    doc.text('Horario Asignado en Lista', 295, y + 6, { width: 190 });
+    doc.text('Clases Dictadas', 490, y + 6, { width: 65, align: 'center' });
+    doc.text('Asistencias (✅)', 560, y + 6, { width: 65, align: 'center' });
+    doc.text('Faltas (❌)', 630, y + 6, { width: 55, align: 'center' });
+    doc.text('% Efectividad', 690, y + 6, { width: 55, align: 'right' });
+    
+    y += 20;
+    doc.font('Helvetica').fontSize(8).fillColor('#0f172a');
+    
+    rows.forEach((row, index) => {
+      if (y > 490) { 
+        doc.addPage({ size: 'LETTER', layout: 'landscape', margin: 40 }); 
+        y = 40; 
+      }
+
+      if (index % 2 === 0) {
+        doc.rect(40, y, 712, 18).fill('#f8fafc');
+        doc.fillColor('#0f172a');
+      }
+
+      const totalClases = parseInt(row.clases_totales || 0);
+      const asistio = parseInt(row.total_asistencias || 0);
+      const falto = parseInt(row.total_inasistencias || 0);
+      
+      const porcentajeIndividual = totalClases > 0 
+        ? ((asistio / totalClases) * 100).toFixed(0) 
+        : "0";
+
+      doc.text(`#${row.alumno_id}`, 45, y + 5, { width: 50 });
+      doc.text(row.nombre_alumno, 105, y + 5, { width: 180, ellipsis: true });
+      doc.text(row.horario_asignado || 'Sin Horario', 295, y + 5, { width: 190, ellipsis: true });
+      doc.text(totalClases.toString(), 490, y + 5, { width: 65, align: 'center' });
+      doc.text(asistio.toString(), 560, y + 5, { width: 65, align: 'center' });
+      doc.text(falto.toString(), 630, y + 5, { width: 55, align: 'center' });
+      
+      doc.font('Helvetica-Bold').text(`${porcentajeIndividual}%`, 690, y + 5, { width: 55, align: 'right' });
+      doc.font('Helvetica');
+
+      doc.strokeColor('#f1f5f9').lineWidth(0.5).moveTo(40, y + 18).lineTo(752, y + 18).stroke();
+      y += 18;
+    });
+
+    doc.options.autoPageBreak = false;
+    doc.strokeColor('#0f172a').lineWidth(1).moveTo(40, 540).lineTo(752, 540).stroke();
+    doc.fillColor('#94a3b8').fontSize(7).text('Reporte Estadístico de Asistencias Central - Complejo Deportivo Los Pinos.', 40, 550);
+    doc.options.autoPageBreak = true;
+
+    doc.end();
+
+  } catch (error) {
+    console.error('❌ Error crítico en generación del PDF de Asistencia:', error);
+    if (!res.headersSent) {
+      return res.status(500).send('Error interno del servidor.');
+    }
+  }
+});
+
 
 
 

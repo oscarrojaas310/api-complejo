@@ -206,7 +206,7 @@ router.get('/reporte-general', async (req, res) => {
         a.nombre_alumno, 
         a.cedula_representante 
       FROM pagos p
-      INNER JOIN alumnos_futbol a ON p.alumno_id = a.id
+      INNER JOIN alumnos a ON p.alumno_id = a.id
     `;
     
     const queryParams = [];

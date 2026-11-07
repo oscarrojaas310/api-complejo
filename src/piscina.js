@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('./db'); // Importa el pool de MySQL
+const path = require('path'); 
 
 // POST: Registrar matrícula de alumno en la piscina
 router.post('/inscripciones', async (req, res) => {
@@ -195,25 +196,22 @@ router.get('/dashboard', async (req, res) => {
 });
 router.get('/reporte-general', async (req, res) => {
   const PDFDocument = require('pdfkit');
-  
-  // 🌟 INTERCEPTAMOS LOS PARÁMETROS DE FECHA DESDE EL FRONTEND
   const { inicio, fin } = req.query;
   
   try {
-    // 1. CONSTRUCCIÓN DE CONSULTA DINÁMICA PARAMETRIZADA (Blindada contra SQL Injection)
+    // 1. Consulta apuntando estrictamente a alumnos_futbol
     let querySQL = `
       SELECT 
         p.*, 
         a.nombre_alumno, 
         a.cedula_representante 
       FROM pagos p
-      INNER JOIN alumnos a ON p.alumno_id = a.id
+      INNER JOIN alumnos_futbol a ON p.alumno_id = a.id
     `;
     
     const queryParams = [];
 
     if (inicio && fin) {
-      // Formateamos el rango para atrapar el día completo de corte (00:00:00 hasta las 23:59:59)
       querySQL += ` WHERE p.fecha_registro BETWEEN ? AND ? `;
       queryParams.push(`${inicio} 00:00:00`, `${fin} 23:59:59`);
     } else if (inicio) {
@@ -225,29 +223,24 @@ router.get('/reporte-general', async (req, res) => {
     }
 
     querySQL += ` ORDER BY p.fecha_registro DESC `;
-    
-    // Ejecutamos la consulta pasándole los filtros cronológicos si aplican
     const [rows] = await pool.query(querySQL, queryParams);
     
-    // 2. Calcular Totales Consolidados discriminando estrictamente los canales de caja
+    // 2. Calcular Totales Consolidados
     let totalDolaresEfectivo = 0;
     let totalBolivaresBancos = 0;
     const totalTransacciones = rows.length;
 
     rows.forEach(pago => {
       const metodo = pago.metodo_pago ? pago.metodo_pago.toLowerCase().trim() : '';
-      
       if (metodo === 'efectivo') {
-        // REGLA OPERATIVA: El efectivo en divisas suma directo a la billetera física (USD)
         totalDolaresEfectivo += parseFloat(pago.monto_dolares || 0);
       } else {
-        // REGLA OPERATIVA: El pago móvil y transferencia alimentan la conciliación bancaria (VES)
         totalBolivaresBancos += parseFloat(pago.monto_bolivares || 0);
       }
     });
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline; filename=Balance_General_Caja_Piscina.pdf');
+    res.setHeader('Content-Disposition', 'inline; filename=Balance_General_Caja_Futbol.pdf');
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
@@ -255,52 +248,55 @@ router.get('/reporte-general', async (req, res) => {
     const doc = new PDFDocument({ size: 'LETTER', layout: 'landscape', margin: 40 });
     doc.pipe(res);
 
-    // Banner Principal - Subtítulo modificado con el rango de fechas en foco
-    let subTextoRango = `Consolidado Completo del Sistema Financiero`;
+    // Banner Principal (Verde oscuro corporativo de fútbol)
+    let subTextoRango = `Consolidado Completo - Academia de Fútbol`;
     if (inicio && fin) subTextoRango = `Balance Cronológico desde ${inicio} hasta ${fin}`;
     
-    doc.rect(40, 40, 712, 50).fill('#0f172a');
-    doc.fillColor('#ffffff').fontSize(14).font('Helvetica-Bold').text('REPORTE GENERAL DE INGRESOS Y AUDITORÍA DE CAJA', 55, 50);
-    doc.fontSize(8).font('Helvetica-Oblique').text(`${subTextoRango} | Generado: ${new Date().toLocaleString()}`, 55, 68);
+    doc.rect(40, 40, 712, 50).fill('#064e3b');
+    doc.fillColor('#ffffff').fontSize(14).font('Helvetica-Bold').text('REPORTE GENERAL DE INGRESOS Y AUDITORÍA DE CAJA (FÚTBOL)', 55, 50);
+    doc.fontSize(8).font('Helvetica-Oblique').text(`${subTextoRango} | Generado: ${new Date().toLocaleString('es-VE')}`, 55, 68);
 
-    // --- Tarjetas Informativas Dinámicas Saneadas ---
+    // Tarjetas Informativas Dinámicas
     let boxWidth = 224;
     let boxY = 105;
 
-    // Caja 1: Efectivo Físico en Divisas
     doc.rect(40, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
     doc.fillColor('#475569').fontSize(7).font('Helvetica-Bold').text('TOTAL DIVISAS EN EFECTIVO (USD)', 50, boxY + 10);
     doc.fillColor('#0f172a').fontSize(14).font('Helvetica-Bold').text(`$ ${totalDolaresEfectivo.toFixed(2)}`, 50, boxY + 22);
 
-    // Caja 2: Medios Electrónicos Bancarios
     doc.rect(40 + boxWidth + 20, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
     doc.fillColor('#059669').fontSize(7).font('Helvetica-Bold').text('TOTAL RECAUDADO EN BOLÍVARES (VES)', 40 + boxWidth + 30, boxY + 10);
     doc.fillColor('#047857').fontSize(14).font('Helvetica-Bold').text(`${totalBolivaresBancos.toFixed(2)} VES`, 40 + boxWidth + 30, boxY + 22);
 
-    // Caja 3: Transacciones Emitidas
     doc.rect(40 + (boxWidth * 2) + 40, boxY, boxWidth, 45).fill('#f8fafc').stroke('#e2e8f0');
     doc.fillColor('#475569').fontSize(7).font('Helvetica-Bold').text('COMPROBANTES TOTALES EMITIDOS', 40 + (boxWidth * 2) + 50, boxY + 10);
     doc.fillColor('#0f172a').fontSize(14).font('Helvetica-Bold').text(`${totalTransacciones} Transacciones`, 40 + (boxWidth * 2) + 50, boxY + 18);
 
-    // --- Tabla General ---
+    // --- Tabla General (Sin columna Origen, con anchos redistribuidos) ---
     let y = 170;
     doc.fillColor('#1e293b').fontSize(10).font('Helvetica-Bold').text('DETALLE INDIVIDUAL DE MOVIMIENTOS A CAJA', 40, y);
     y += 15;
 
     doc.rect(40, y, 712, 20).fill('#e2e8f0');
     doc.fillColor('#334155').font('Helvetica-Bold').fontSize(8);
-    doc.text('ID Recibo', 45, y + 6, { width: 45 });
-    doc.text('Atleta / Alumno', 100, y + 6, { width: 140 });
-    doc.text('Cédula Rep.', 250, y + 6, { width: 70 });
-    doc.text('Mes Cobro', 330, y + 6, { width: 65 });
-    doc.text('Fecha Pago', 405, y + 6, { width: 65 });
-    doc.text('Método', 480, y + 6, { width: 60 });
-    doc.text('Monto ($)', 550, y + 6, { width: 55, align: 'right' });
-    doc.text('Monto (Bs.)', 615, y + 6, { width: 75, align: 'right' });
-    doc.text('Origen', 700, y + 6, { width: 45, align: 'center' });
+    doc.text('ID', 45, y + 6, { width: 40 });
+    doc.text('Atleta', 90, y + 6, { width: 165 });
+    doc.text('Cédula Rep.', 265, y + 6, { width: 75 });
+    doc.text('Mes Cobro', 350, y + 6, { width: 85 }); // Más ancho para el mes en letras
+    doc.text('Fecha Pago', 445, y + 6, { width: 65 });
+    doc.text('Método', 520, y + 6, { width: 70 });
+    doc.text('Monto ($)', 600, y + 6, { width: 60, align: 'right' });
+    doc.text('Monto (Bs.)', 670, y + 6, { width: 75, align: 'right' });
     
     y += 20;
     doc.font('Helvetica').fontSize(8).fillColor('#0f172a');
+
+    // Diccionario para traducir "2026-11" a letras
+    const mesesDiccionario = {
+      '01': 'ENERO', '02': 'FEBRERO', '03': 'MARZO', '04': 'ABRIL',
+      '05': 'MAYO', '06': 'JUNIO', '07': 'JULIO', '08': 'AGOSTO',
+      '09': 'SEPTIEMBRE', '10': 'OCTUBRE', '11': 'NOVIEMBRE', '12': 'DICIEMBRE'
+    };
     
     rows.forEach((pago, index) => {
       if (y > 490) { 
@@ -313,32 +309,36 @@ router.get('/reporte-general', async (req, res) => {
         doc.fillColor('#0f172a');
       }
 
-      const fechaFormateada = new Date(pago.fecha_registro).toLocaleDateString();
-      const procedencia = pago.guardado_offline ? 'OFFLINE' : 'RED';
-      const metodoTexto = pago.metodo_pago ? pago.metodo_pago.toUpperCase() : '';
+      // Conversión del mes numérico a texto legible
+      let mesTexto = (pago.mes_pagado || '').toUpperCase();
+      if (pago.mes_pagado && pago.mes_pagado.includes('-')) {
+        const [ano, mesNum] = pago.mes_pagado.split('-');
+        const nombreMes = mesesDiccionario[mesNum] || mesNum;
+        mesTexto = `${nombreMes} ${ano}`;
+      }
 
-      // Saneado de la columna de bolívares para operaciones en efectivo
+      const fechaFormateada = new Date(pago.fecha_registro).toLocaleDateString('es-VE');
+      const metodoTexto = pago.metodo_pago ? pago.metodo_pago.toUpperCase() : '';
       const montoBsTexto = metodoTexto === 'EFECTIVO' 
         ? 'N/A' 
         : `${parseFloat(pago.monto_bolivares || 0).toFixed(2)}`;
 
-      doc.text(`#${pago.id}`, 45, y + 5, { width: 45 });
-      doc.text(pago.nombre_alumno, 100, y + 5, { width: 140, ellipsis: true });
-      doc.text(pago.cedula_representante || 'N/P', 250, y + 5, { width: 70 });
-      doc.text(pago.mes_pagado, 330, y + 5, { width: 65 });
-      doc.text(fechaFormateada, 405, y + 5, { width: 65 });
-      doc.text(metodoTexto, 480, y + 5, { width: 60 });
-      doc.text(`$${parseFloat(pago.monto_dolares || 0).toFixed(2)}`, 550, y + 5, { width: 55, align: 'right' });
-      doc.text(montoBsTexto, 615, y + 5, { width: 75, align: 'right' });
-      doc.text(procedencia, 700, y + 5, { width: 45, align: 'center' });
+      doc.text(`#${pago.id}`, 45, y + 5, { width: 40 });
+      doc.text(pago.nombre_alumno, 90, y + 5, { width: 165, ellipsis: true });
+      doc.text(pago.cedula_representante || 'N/P', 265, y + 5, { width: 75 });
+      doc.text(mesTexto, 350, y + 5, { width: 85 }); // Imprime ej: "NOVIEMBRE 2026"
+      doc.text(fechaFormateada, 445, y + 5, { width: 65 });
+      doc.text(metodoTexto, 520, y + 5, { width: 70 });
+      doc.text(`$${parseFloat(pago.monto_dolares || 0).toFixed(2)}`, 600, y + 5, { width: 60, align: 'right' });
+      doc.text(montoBsTexto, 670, y + 5, { width: 75, align: 'right' });
 
       doc.strokeColor('#f1f5f9').lineWidth(0.5).moveTo(40, y + 18).lineTo(752, y + 18).stroke();
       y += 18;
     });
 
     doc.options.autoPageBreak = false;
-    doc.strokeColor('#0f172a').lineWidth(1).moveTo(40, 540).lineTo(752, 540).stroke();
-    doc.fillColor('#94a3b8').fontSize(7).text('Reporte de Auditoría Central Interno - Desarrollado bajo especificaciones de resiliencia Offline-First.', 40, 550);
+    doc.strokeColor('#064e3b').lineWidth(1).moveTo(40, 540).lineTo(752, 540).stroke();
+    doc.fillColor('#94a3b8').fontSize(7).text('Reporte de Auditoría Central Interno - Academia de Fútbol Base Los Pinos.', 40, 550);
     doc.options.autoPageBreak = true;
 
     doc.end();
@@ -471,12 +471,11 @@ router.get('/reporte-asistencia', async (req, res) => {
     let y = 170;
     doc.fillColor('#1e293b').fontSize(10).font('Helvetica-Bold').text('MÉTRICAS DE RENDIMIENTO INDIVIDUAL POR ATLETA', 40, y);
     y += 15;
-
     doc.rect(40, y, 712, 20).fill('#e2e8f0');
     doc.fillColor('#334155').font('Helvetica-Bold').fontSize(8);
-    doc.text('ID Alumno', 45, y + 6, { width: 50 });
-    doc.text('Nombre Completo del Atleta', 105, y + 6, { width: 180 });
-    doc.text('Horario Asignado en Lista', 295, y + 6, { width: 190 });
+    // 🗑️ Eliminado 'ID Alumno' y redistribuido el espacio
+    doc.text('Nombre Completo del Atleta', 45, y + 6, { width: 220 });
+    doc.text('Horario Asignado en Lista', 275, y + 6, { width: 210 });
     doc.text('Clases Dictadas', 490, y + 6, { width: 65, align: 'center' });
     doc.text('Asistencias (✅)', 560, y + 6, { width: 65, align: 'center' });
     doc.text('Faltas (❌)', 630, y + 6, { width: 55, align: 'center' });
@@ -504,9 +503,9 @@ router.get('/reporte-asistencia', async (req, res) => {
         ? ((asistio / totalClases) * 100).toFixed(0) 
         : "0";
 
-      doc.text(`#${row.alumno_id}`, 45, y + 5, { width: 50 });
-      doc.text(row.nombre_alumno, 105, y + 5, { width: 180, ellipsis: true });
-      doc.text(row.horario_asignado || 'Sin Horario', 295, y + 5, { width: 190, ellipsis: true });
+      // 🗑️ Eliminada la impresión de row.alumno_id
+      doc.text(row.nombre_alumno, 45, y + 5, { width: 220, ellipsis: true });
+      doc.text(row.horario_asignado || 'Sin Horario', 275, y + 5, { width: 210, ellipsis: true });
       doc.text(totalClases.toString(), 490, y + 5, { width: 65, align: 'center' });
       doc.text(asistio.toString(), 560, y + 5, { width: 65, align: 'center' });
       doc.text(falto.toString(), 630, y + 5, { width: 55, align: 'center' });
@@ -529,6 +528,130 @@ router.get('/reporte-asistencia', async (req, res) => {
     console.error('❌ Error crítico en generación del PDF de Asistencia:', error);
     if (!res.headersSent) {
       return res.status(500).send('Error interno del servidor.');
+    }
+  }
+});
+
+// GET: Generar y mostrar vista previa del recibo digital de piscina en PDF
+router.get('/alumnos/:id/recibo-pdf', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // 1. Consultar los datos en la tabla 'alumnos' de piscina
+    const [alumnos] = await pool.query('SELECT * FROM alumnos WHERE id = ?', [id]);
+    if (alumnos.length === 0) {
+      return res.status(404).send('Alumno no encontrado en el sistema.');
+    }
+    const alumno = alumnos[0];
+
+    // 2. Agrupar todos los pagos de piscina realizados en la última transacción
+    const [pagos] = await pool.query(`
+      SELECT 
+        MAX(id) AS id,
+        alumno_id,
+        GROUP_CONCAT(mes_pagado ORDER BY mes_pagado ASC SEPARATOR ', ') AS meses_agrupados,
+        metodo_pago,
+        tasa_bcv,
+        SUM(monto_dolares) AS total_dolares,
+        SUM(monto_bolivares) AS total_bolivares,
+        fecha_registro
+      FROM pagos 
+      WHERE alumno_id = ? 
+        AND fecha_registro = (SELECT MAX(fecha_registro) FROM pagos WHERE alumno_id = ?)
+      GROUP BY fecha_registro, alumno_id, metodo_pago, tasa_bcv
+    `, [id, id]);
+
+    if (pagos.length === 0) {
+      return res.status(404).send('Este alumno no registra pagos cargados en el sistema.');
+    }
+    const pago = pagos[0];
+
+    // 3. Traducir formato "2026-11" a "NOVIEMBRE 2026"
+    const mesesDiccionario = {
+      '01': 'ENERO', '02': 'FEBRERO', '03': 'MARZO', '04': 'ABRIL',
+      '05': 'MAYO', '06': 'JUNIO', '07': 'JULIO', '08': 'AGOSTO',
+      '09': 'SEPTIEMBRE', '10': 'OCTUBRE', '11': 'NOVIEMBRE', '12': 'DICIEMBRE'
+    };
+
+    const mesesLegiblesArray = pago.meses_agrupados.split(', ').map(mesRaw => {
+      if (mesRaw.includes('-')) {
+        const [ano, mesNum] = mesRaw.split('-');
+        const nombreMes = mesesDiccionario[mesNum] || mesNum;
+        return `${nombreMes} ${ano}`;
+      }
+      return mesRaw.toUpperCase();
+    });
+    
+    const mesesLiquidadosFinal = mesesLegiblesArray.join(' / ');
+
+    // 4. Configurar respuesta HTTP como vista previa inline
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename=Recibo_Piscina_LosPinos_ID_${id}.pdf`);
+
+    const doc = new PDFDocument({ size: 'LETTER', margin: 40 });
+    doc.pipe(res);
+
+    // Marco perimetral
+    doc.rect(20, 20, 572, 752).stroke('#cbd5e1');
+
+    // Cintillo superior
+    try {
+      const rutaCintillo = path.join(__dirname, 'public', 'cintillo_pago_mensualidad_piscina.png');
+      doc.image(rutaCintillo, 40, 35, { width: 532, height: 65 });
+    } catch (imgError) {
+      doc.fillColor('#1d4ed8').font('Helvetica-Bold').fontSize(22).text('COMPLEJO DEPORTIVO LOS PINOS', 40, 50);
+    }
+    
+    doc.moveTo(40, 115).lineTo(550, 115).stroke('#e2e8f0');
+
+    // Datos de control interno (Azul corporativo para piscina)
+    doc.fillColor('#475569').font('Helvetica').fontSize(10);
+    doc.text(`Nro. Recibo: #PIS-${pago.id.toString().padStart(5, '0')}`, 400, 125, { align: 'right' });
+    doc.text(`Fecha Emisión: ${new Date(pago.fecha_registro).toLocaleDateString('es-VE')}`, 400, 140, { align: 'right' });
+    doc.text('Estatus: ORIGINAL / APROBADO ✅', 400, 155, { align: 'right' });
+
+    // Sección 1: Identificación del Alumno
+    doc.fillColor('#1d4ed8').font('Helvetica-Bold').fontSize(12).text('1. INFORMACIÓN DEL ALUMNO - ÁREA PISCINA', 40, 185);
+    doc.moveTo(40, 200).lineTo(550, 200).stroke('#f1f5f9');
+
+    doc.fillColor('#1e293b').font('Helvetica').fontSize(10);
+    doc.text(`Alumno: ${alumno.nombre_alumno}`, 40, 215);
+    doc.text(`Edad: ${alumno.edad_alumno} años`, 40, 230);
+    doc.text(`Nivel: ${alumno.nivel.toUpperCase()}`, 40, 245);
+    doc.text(`Horario: ${alumno.horario_asignado}`, 40, 260);
+
+    doc.text(`Representante / Titular: ${alumno.nombre_representante || alumno.nombre_alumno}`, 300, 215);
+    doc.text(`Cédula: ${alumno.cedula_representante}`, 300, 230);
+    doc.text(`Teléfono: ${alumno.telefono_representante}`, 300, 245);
+
+    // Sección 2: Detalles de Facturación
+    doc.fillColor('#1d4ed8').font('Helvetica-Bold').fontSize(12).text('2. DETALLES DE FACTURACIÓN', 40, 295);
+    doc.moveTo(40, 310).lineTo(550, 310).stroke('#f1f5f9');
+
+    doc.fillColor('#1e293b').font('Helvetica');
+    doc.text(`Meses Liquidados: ${mesesLiquidadosFinal}`, 40, 325); 
+    doc.text(`Método / Referencia: ${pago.metodo_pago.toUpperCase()}`, 40, 340);
+    doc.text(`Tasa de Cambio BCV: ________________ VES/USD`, 40, 355);
+
+    // Cuadro resumen de importes
+    doc.roundedRect(40, 390, 510, 60, 8).fill('#f8fafc');
+    
+    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(11).text('TOTAL PROCESADO (USD $):', 60, 410);
+    doc.fillColor('#1d4ed8').font('Helvetica-Bold').fontSize(16).text(`$${parseFloat(pago.total_dolares).toFixed(2)}`, 240, 407); 
+
+    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(11).text('MTO. EQUIVALENTE (VES):______________', 300, 410);
+    // Pie de página
+    doc.moveTo(40, 680).lineTo(550, 680).stroke('#cbd5e1');
+    doc.fillColor('#94a3b8').font('Helvetica-Oblique').fontSize(8);
+    doc.text('Este documento digital sirve como comprobante legal de pago para la Piscina del Complejo Deportivo Los Pinos.', 40, 695, { align: 'center' });
+    doc.text('Generado automáticamente por el Sistema Administrativo de Control y Caja Los Pinos.', 40, 708, { align: 'center' });
+
+    doc.end();
+
+  } catch (error) {
+    console.error('Error generando PDF de piscina:', error);
+    if (!res.headersSent) {
+      res.status(500).send('Error interno del servidor al procesar el archivo PDF.');
     }
   }
 });
@@ -996,18 +1119,14 @@ router.post('/asistencia-diaria', async (req, res) => {
     await conexion.beginTransaction();
 
     console.log(`⏳ Procesando asistencia para el turno ${horario} del día ${fecha}...`);
-
-    // Preparamos la consulta con ON DUPLICATE KEY UPDATE. 
-    // Si el entrenador vuelve a pasar asistencia del mismo turno para corregir algo,
-    // MySQL actualizará el estado (Presente/Ausente) en lugar de dar error.
     const querySQL = `
-      INSERT INTO asistencias (alumno_id, fecha, horario, bloque, asistio) 
-      VALUES (?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE 
-        asistio = VALUES(asistio),
-        horario = VALUES(horario),
-        bloque = VALUES(bloque)
-    `;
+  INSERT INTO asistencias (alumno_id, fecha, horario, bloque, asistio) 
+  VALUES (?, ?, ?, ?, ?)
+  ON DUPLICATE KEY UPDATE 
+    asistio = VALUES(asistio),
+    bloque = VALUES(bloque)
+`;
+
 
     // Ejecutamos cada inserción de forma consecutiva dentro de la misma transacción
     for (const reg of registros) {
@@ -1041,17 +1160,6 @@ router.post('/asistencia-diaria', async (req, res) => {
   } finally {
     // 🔌 Devolvemos la conexión al pool de inmediato para que quede libre para otros usuarios
     conexion.release();
-  }
-});
-
-router.get('/asistencias-completadas', async (req, res) => {
-  const { fecha } = req.query;
-  try {
-    const [rows] = await pool.query('SELECT DISTINCT horario FROM asistencias WHERE fecha = ?', [fecha]);
-    const completados = rows.map(r => r.horario);
-    return res.status(200).json(completados);
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
   }
 });
 
@@ -1098,29 +1206,6 @@ router.get('/asistencia-resumen-semanal', async (req, res) => {
   }
 });
 
-// 4. ENDPOINT: Obtener la nómina detallada de un día histórico para auditar
-router.get('/asistencia-detalle', async (req, res) => {
-  const { fecha, horario } = req.query;
-  
-  if (!fecha || !horario) {
-    return res.status(400).json({ error: 'Los parámetros fecha y horario son obligatorios.' });
-  }
-
-  try {
-    const querySQL = `
-      SELECT a.nombre_alumno, ast.asistio 
-      FROM asistencias ast
-      INNER JOIN alumnos a ON ast.alumno_id = a.id
-      WHERE ast.fecha = ? AND ast.horario = ?
-      ORDER BY a.nombre_alumno ASC
-    `;
-    const [rows] = await pool.query(querySQL, [fecha, horario]);
-    return res.status(200).json(rows);
-  } catch (error) {
-    console.error('Error en asistencia-detalle:', error);
-    return res.status(500).json({ error: error.message });
-  }
-});
 // POST: Registrar matrícula de alumno en la Academia de Fútbol Menor
 router.post('/futbol/inscripciones', async (req, res) => {
   const {

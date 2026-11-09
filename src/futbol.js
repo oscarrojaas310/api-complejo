@@ -148,23 +148,26 @@ router.get('/dashboard', async (req, res) => {
         turnosCount[alumno.horario_asignado]++;
       }
 
-      // --- 🛡️ COPIA DE LA LÓGICA DE PISCINA (Estable en local y en la nube) ---
-      const fechaReg = new Date(alumno.registrado_el);
-      let anoInicioDeuda = fechaReg.getFullYear();
-      let mesInicioDeuda = fechaReg.getMonth();
+      // --- 🛡️ CONTROL DE FECHAS ULTRA-SEGURO ANTI-TIMEZONES ---
+      // Forzamos la fecha a un string ISO para picarla limpiamente sin importar la zona horaria del servidor
+      const fechaISO = new Date(alumno.registrado_el).toISOString().split('T')[0]; // "YYYY-MM-DD"
+      const partes = fechaISO.split('-');
+      
+      const anoInicioDeuda = parseInt(partes[0], 10);
+      const mesInicioDeuda = parseInt(partes[1], 10) - 1; // Base 0 (Enero = 0)
 
-      // Calculamos cuántos meses han transcurrido desde su mes de inicio exigible hasta el mes ACTUAL
+      // Calculamos exactamente cuántos meses comerciales completos han transcurrido
       const mesesTranscurridos = (anoActual - anoInicioDeuda) * 12 + (mesActual - mesInicioDeuda) + 1;
 
-      // REGLA DE MOROSIDAD AMIGABLE: El mes en curso NO cuenta como deuda pendiente para la lista de morosos.
+      // REGLA DE MOROSIDAD AMIGABLE: El mes en curso NO cuenta como deuda vencida.
       const mesesExigiblesVencidos = mesesTranscurridos - 1;
 
-      // Buscamos si en la base de datos ya pagó el mes actual compacto (Ej: "2026-10")
+      // Buscamos si en la base de datos ya pagó el mes actual compacto (Ej: "2026-11")
       const pagosAlumno = pagos.filter(p => p.alumno_id === alumno.id);
       const mesActualFormato = `${anoActual}-${String(mesActual + 1).padStart(2, '0')}`;
       const yaPagoMesActual = pagosAlumno.some(p => p.mes_pagado === mesActualFormato);
 
-      // Si el alumno es nuevo y no tiene meses exigibles vencidos aún
+      // Si el alumno es nuevo y no tiene meses exigibles del pasado vencidos aún
       if (mesesExigiblesVencidos <= 0) {
         if (yaPagoMesActual) {
           listaSolventes.push(alumno);
@@ -195,7 +198,6 @@ router.get('/dashboard', async (req, res) => {
         }
       }
     });
-
     // 🌅 FILTRO 1: Construcción de la Malla del Turno de la Mañana
     const turnos_manana = [
       {
@@ -646,24 +648,36 @@ router.get('/alumnos/:id/recibo-pdf', async (req, res) => {
       return res.status(404).send('Atleta no encontrado en el sistema.');
     }
     const atleta = atletas[0];
-
-    // 2. ✅ CORREGIDO: Añadimos MAX(id) AS id para que no llegue undefined
+    // 2. ✅ CORREGIDO: Buscamos el último lote de pagos basándonos en el ID más alto de forma exacta
     const [pagos] = await pool.query(`
       SELECT 
-        MAX(id) AS id,
-        alumno_id,
-        GROUP_CONCAT(mes_pagado ORDER BY mes_pagado ASC SEPARATOR ', ') AS meses_agrupados,
-        metodo_pago,
-        referencia,
-        tasa_bcv,
-        SUM(monto_dolares) AS total_dolares,
-        SUM(monto_bolivares) AS total_bolivares,
-        fecha_registro
-      FROM pagos_futbol 
-      WHERE alumno_id = ? 
-        AND fecha_registro = (SELECT MAX(fecha_registro) FROM pagos_futbol WHERE alumno_id = ?)
-      GROUP BY fecha_registro, alumno_id, metodo_pago, referencia, tasa_bcv
-    `, [id, id]);
+        p.id,
+        p.alumno_id,
+        p.metodo_pago,
+        p.referencia,
+        p.tasa_bcv,
+        p.fecha_registro,
+        -- Agrupamos los meses que se pagaron en esa misma transacción exacta (misma referencia o fecha)
+        (
+          SELECT GROUP_CONCAT(mes_pagado ORDER BY mes_pagado ASC SEPARATOR ', ')
+          FROM pagos_futbol 
+          WHERE alumno_id = p.alumno_id AND fecha_registro = p.fecha_registro
+        ) AS meses_agrupados,
+        (
+          SELECT SUM(monto_dolares) 
+          FROM pagos_futbol 
+          WHERE alumno_id = p.alumno_id AND fecha_registro = p.fecha_registro
+        ) AS total_dolares,
+        (
+          SELECT SUM(monto_bolivares) 
+          FROM pagos_futbol 
+          WHERE alumno_id = p.alumno_id AND fecha_registro = p.fecha_registro
+        ) AS total_bolivares
+      FROM pagos_futbol p
+      WHERE p.alumno_id = ? 
+      ORDER BY p.id DESC 
+      LIMIT 1
+    `, [id]);
 
     if (pagos.length === 0) {
       return res.status(404).send('Este atleta no registra pagos cargados en el sistema.');

@@ -12,136 +12,26 @@ let cacheTasaSistema = {
 const TIEMPO_CACHE = 6 * 60 * 60 * 1000; 
 
 router.get('/tasa-bcv', async (req, res) => {
-  const ahora = new Date();
-
-  // ---- PASO OPTIMIZADO: ¿TENEMOS LA TASA EN MEMORIA RAM? ----
-  if (cacheTasaSistema.valor && cacheTasaSistema.ultimaActualizacion && (ahora - cacheTasaSistema.ultimaActualizacion < TIEMPO_CACHE)) {
-    console.log(`⚡ Servido desde caché en RAM de Render: ${cacheTasaSistema.valor} VES (Ahorro total de red)`);
-    return res.status(200).json({ 
-      tasa: cacheTasaSistema.valor, 
-      origen: 'memoria_ram_cache',
-      status: 'operativo'
-    });
-  }
-
-  // 🚀 CORREGIDO: URL e hilos de ejecución limpios para Venezuela
-  const urlDolarApi = 'https://dolarapi.com';
-  const urlCotizave = 'https://api.cotizave.com/v1/fx/rates/reference';
-  
-  const configuracionHeadersCotizave = {
-    'X-API-Key': 'ctz_live_0RkBOtMcDmSZQquuI2t2mNuhGAZy0BbSCtN8dY',
-    'Accept': 'application/json',
-    'User-Agent': 'AdminPiscinaLosPinos/1.0'
-  };
-
-  let tasaCalculada = null;
-  let proveedorOrigen = null;
-
-  // ---- INTENTO 1: DOLARAPI (100% GRATUITO E ILIMITADO) ----
   try {
-    const respuestaDolarApi = await fetch(urlDolarApi, { method: 'GET', timeout: 4000 });
+    // ✅ CORREGIDO: Cambiado 'tasa_bcv' por 'tasa_bcv_actual' para que haga match con tu registro de Aiven
+    const [rows] = await pool.query("SELECT valor FROM ajustes_sistema WHERE clave = 'tasa_bcv_actual' LIMIT 1");
     
-    if (respuestaDolarApi.ok) {
-      const dataDolar = await respuestaDolarApi.json();
-      
-      // 🚀 CORREGIDO: DolarApi entrega un objeto directo con la llave "promedio"
-      if (dataDolar && dataDolar.promedio) {
-        tasaCalculada = parseFloat(dataDolar.promedio);
-        proveedorOrigen = 'dolarapi_live';
-        console.log(`📊 Tasa extraída con éxito de DolarApi: ${tasaCalculada} VES`);
-      }
-    } else {
-      console.warn(`⚠️ DolarApi respondió con estatus erróneo: ${respuestaDolarApi.status}`);
-    }
-  } catch (errDolar) {
-    console.warn(`⚠️ DolarApi falló por completo: ${errDolar.message}. Pasando a Cotizave...`);
-  }
-
-  // ---- INTENTO 2: RESPALDO CON COTIZAVE (Solo si DolarApi falló) ----
-  if (!tasaCalculada) {
-    try {
-      const respuestaCotizave = await fetch(urlCotizave, { 
-        method: 'GET',
-        headers: configuracionHeadersCotizave,
-        timeout: 4000 
-      });
-      
-      if (respuestaCotizave.status === 200) {
-        const dataCotizave = await respuestaCotizave.json();
-        if (dataCotizave?.mid) {
-          tasaCalculada = parseFloat(dataCotizave.mid);
-          proveedorOrigen = 'cotizave_api_live';
-          console.log(`📊 Tasa extraída de Cotizave Respaldo: ${tasaCalculada} VES`);
-        }
-      } else {
-        console.warn(`🚫 Cotizave rechazó la solicitud con estatus: ${respuestaCotizave.status}`);
-      }
-    } catch (errCotizave) {
-      console.warn(`⚠️ Cotizave completamente bloqueado o caído: ${errCotizave.message}`);
-    }
-  }
-
-  // ---- PROCESAMIENTO Y ACTUALIZACIÓN (Si alguna de las APIs en vivo respondió) ----
-  if (tasaCalculada && tasaCalculada > 0) {
-    try {
-      // Actualizamos la caché en la RAM del servidor
-      cacheTasaSistema.valor = tasaCalculada;
-      cacheTasaSistema.ultimaActualizacion = ahora;
-
-      // Resguardamos en tu tabla ajustes_sistema en MySQL de Aiven
-      const queryUpsert = `
-        INSERT INTO ajustes_sistema (clave, valor) 
-        VALUES ('tasa_bcv_actual', ?) 
-        ON DUPLICATE KEY UPDATE valor = ?, actualizado_el = CURRENT_TIMESTAMP;
-      `;
-      const stringTasa = tasaCalculada.toFixed(2);
-      await pool.query(queryUpsert, [stringTasa, stringTasa]);
-
+    if (rows.length > 0) {
       return res.status(200).json({ 
-        tasa: tasaCalculada, 
-        origen: proveedorOrigen,
-        status: 'actualizado_y_guardado'
-      });
-    } catch (errorSQL) {
-      console.error("❌ Error al guardar la tasa fresca en MySQL, pero se mantiene en RAM:", errorSQL.message);
-      return res.status(200).json({ 
-        tasa: tasaCalculada, 
-        origen: proveedorOrigen,
-        nota: "Tasa actualizada en vivo pero falló persistencia SQL."
+        tasa: parseFloat(rows[0].valor), 
+        origen: 'ajustes_sistema_mysql_local' 
       });
     }
+
+    console.warn("⚠️ Advertencia: No se encontró la fila 'tasa_bcv_actual' en la tabla ajustes_sistema.");
+    return res.status(404).json({ error: 'Clave de tasa no configurada en ajustes_sistema.' });
+
+  } catch (error) {
+    console.error('❌ Error consultando tasa en ajustes_sistema:', error);
+    return res.status(500).json({ error: 'Error interno al consultar la tasa.' });
   }
-
-  // ---- 🛡️ PLAN DE CONTINGENCIA SUPREMO (Si internet o ambas APIs fallan) ----
-  console.warn("🚨 Fallo total de APIs externas. Activando contingencia de base de datos local.");
-  try {
-    const [registro] = await pool.query("SELECT valor FROM ajustes_sistema WHERE clave = 'tasa_bcv_actual' LIMIT 1");
-    if (registro.length > 0) {
-      const tasaHistoricaLocal = parseFloat(registro[0].valor);
-      
-      // Alimentamos la caché RAM con el último dato viejo para no estresar la DB en las próximas 6 horas
-      cacheTasaSistema.valor = tasaHistoricaLocal;
-      cacheTasaSistema.ultimaActualizacion = ahora;
-
-      console.log(`💾 Contingencia Exitosa: Usando tasa de tu tabla ajustes_sistema: ${tasaHistoricaLocal} VES`);
-      return res.status(200).json({ 
-        tasa: tasaHistoricaLocal, 
-        origen: 'ajustes_sistema_mysql_local',
-        nota: "Modo contingencia activa. Utilizando último resguardo de base de datos."
-      });
-    }
-  } catch (errorSQL) {
-    console.error("❌ La tabla de contingencia ajustes_sistema falló:", errorSQL.message);
-  }
-
-  // ---- PLAN C (Último recurso extremo de seguridad) ----
-  const tasaRespaldoEmergencia = 62.50; 
-  return res.status(200).json({ 
-    tasa: tasaRespaldoEmergencia, 
-    origen: 'emergencia_codigo_duro',
-    nota: "Colapso total del ecosistema de datos."
-  });
 });
+
 
 
 router.post('/inscripciones', async (req, res) => {
@@ -1110,5 +1000,39 @@ router.get('/reporte-asistencia', async (req, res) => {
     }
   }
 });
+
+router.delete('/alumnos/:id', async (req, res) => {
+  const { id } = req.params;
+  const conexion = await pool.getConnection();
+
+  try {
+    await conexion.beginTransaction();
+
+    // 🔓 Desactivamos temporalmente el bloqueo de llaves foráneas solo para esta sesión
+    await conexion.query('SET FOREIGN_KEY_CHECKS = 0');
+
+    // Borramos registros asociados (Asegúrate de que los nombres coincidan con tu BD en Aiven)
+    await conexion.query('DELETE FROM asistencias_futbol WHERE alumno_id = ?', [id]);
+    await conexion.query('DELETE FROM pagos_futbol WHERE alumno_id = ?', [id]);
+    
+    // ⚠️ VERIFICA ESTE NOMBRE: ¿Tu tabla principal en Aiven se llama 'futbol_alumnos' o 'alumnos_futbol'?
+    await conexion.query('DELETE FROM alumnos_futbol WHERE id = ?', [id]);
+
+    // 🔒 Reactivamos la seguridad de llaves foráneas
+    await conexion.query('SET FOREIGN_KEY_CHECKS = 1');
+
+    await conexion.commit();
+    return res.status(200).json({ mensaje: 'Atleta eliminado definitivamente.' });
+  } catch (error) {
+    await conexion.query('SET FOREIGN_KEY_CHECKS = 1').catch(() => {});
+    await conexion.rollback();
+    console.error('❌ Error al eliminar atleta de fútbol:', error);
+    return res.status(500).json({ error: 'Error interno al eliminar el atleta.', detalle: error.message });
+  } finally {
+    conexion.release();
+  }
+});
+
+
 
 module.exports = router;

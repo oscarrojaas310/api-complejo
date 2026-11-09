@@ -1291,4 +1291,29 @@ router.post('/futbol/inscripciones', async (req, res) => {
   }
 });
 
+router.delete('/alumnos/:id', async (req, res) => {
+  const { id } = req.params;
+  const conexion = await pool.getConnection();
+
+  try {
+    await conexion.beginTransaction();
+    await conexion.query('SET FOREIGN_KEY_CHECKS = 0');
+
+    await conexion.query('DELETE FROM asistencias WHERE alumno_id = ?', [id]);
+    await conexion.query('DELETE FROM pagos WHERE alumno_id = ?', [id]);
+    await conexion.query('DELETE FROM alumnos WHERE id = ?', [id]);
+
+    await conexion.query('SET FOREIGN_KEY_CHECKS = 1');
+    await conexion.commit();
+    return res.status(200).json({ mensaje: 'Alumno de piscina eliminado definitivamente.' });
+  } catch (error) {
+    await conexion.query('SET FOREIGN_KEY_CHECKS = 1').catch(() => {});
+    await conexion.rollback();
+    console.error('❌ Error al eliminar alumno de piscina:', error);
+    return res.status(500).json({ error: 'Error interno al eliminar el alumno.', detalle: error.message });
+  } finally {
+    conexion.release();
+  }
+});
+
 module.exports = router;

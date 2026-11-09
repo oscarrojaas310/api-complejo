@@ -148,10 +148,17 @@ router.get('/dashboard', async (req, res) => {
         turnosCount[alumno.horario_asignado]++;
       }
 
-      // --- LÓGICA DE CONTROL DE MOROSIDAD ---
-      const fechaReg = new Date(alumno.registrado_el);
-      let anoInicioDeuda = fechaReg.getFullYear();
-      let mesInicioDeuda = fechaReg.getMonth();
+      // --- 🛡️ LÓGICA DE CONTROL DE MOROSIDAD RESISTENTE A SERVIDORES UTC ---
+      let anoInicioDeuda = anoActual;
+      let mesInicioDeuda = mesActual;
+
+      if (alumno.registrado_el) {
+        // Si viene como objeto Date o string, lo convertimos a ISO para picar el texto limpio (YYYY-MM-DD)
+        const fechaString = new Date(alumno.registrado_el).toISOString().split('T')[0];
+        const partes = fechaString.split('-'); // [YYYY, MM, DD]
+        anoInicioDeuda = parseInt(partes[0], 10);
+        mesInicioDeuda = parseInt(partes[1], 10) - 1; // Base 0 (Enero = 0)
+      }
 
       const mesesTranscurridos = (anoActual - anoInicioDeuda) * 12 + (mesActual - mesInicioDeuda) + 1;
       const mesesExigiblesVencidos = mesesTranscurridos - 1;
@@ -230,6 +237,11 @@ router.get('/dashboard', async (req, res) => {
         alumnos: turnosCount['Lunes, Miércoles y Viernes: 06:00 PM - 07:00 PM']
       }
     ];
+
+    // Cabeceras anti-caché robustas para navegadores móviles y Render
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
 
     // RETORNO DE DATOS LIMPIOS PARA EL FRONTEND
     return res.status(200).json({

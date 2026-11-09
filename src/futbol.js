@@ -119,7 +119,7 @@ router.post('/inscripciones', async (req, res) => {
 // GET: Panel de control con mallas horarias oficiales de la Academia de Fútbol
 router.get('/dashboard', async (req, res) => {
   try {
-    // 1. Obtener datos de la base de datos de fútbol
+    // 1. Obtener todos los alumnos y pagos de Fútbol desde Aiven MySQL
     const [alumnos] = await pool.query('SELECT * FROM alumnos_futbol ORDER BY registrado_el DESC');
     const [pagos] = await pool.query('SELECT alumno_id, mes_pagado FROM pagos_futbol');
 
@@ -131,7 +131,7 @@ router.get('/dashboard', async (req, res) => {
     const listaPendientes = [];
     const listaSolventes = [];
     
-    // 📊 Diccionario de contadores mapeado exactamente a tu base de datos
+    // 📊 Diccionario de contadores mapeado exactamente a tu base de datos de fútbol
     let turnosCount = {
       'Lunes, Miércoles y Viernes: 08:00 AM - 09:15 AM': 0,
       'Lunes, Miércoles y Viernes: 09:15 AM - 10:30 AM': 0,
@@ -143,30 +143,28 @@ router.get('/dashboard', async (req, res) => {
     };
 
     alumnos.forEach(alumno => {
-      // Incrementar contador si el horario asignado coincide de forma exacta
+      // Contabilizar alumnos en los turnos de fútbol
       if (turnosCount[alumno.horario_asignado] !== undefined) {
         turnosCount[alumno.horario_asignado]++;
       }
 
-      // --- 🛡️ LÓGICA DE CONTROL DE MOROSIDAD RESISTENTE A SERVIDORES UTC ---
-      let anoInicioDeuda = anoActual;
-      let mesInicioDeuda = mesActual;
+      // --- 🛡️ COPIA DE LA LÓGICA DE PISCINA (Estable en local y en la nube) ---
+      const fechaReg = new Date(alumno.registrado_el);
+      let anoInicioDeuda = fechaReg.getFullYear();
+      let mesInicioDeuda = fechaReg.getMonth();
 
-      if (alumno.registrado_el) {
-        // Si viene como objeto Date o string, lo convertimos a ISO para picar el texto limpio (YYYY-MM-DD)
-        const fechaString = new Date(alumno.registrado_el).toISOString().split('T')[0];
-        const partes = fechaString.split('-'); // [YYYY, MM, DD]
-        anoInicioDeuda = parseInt(partes[0], 10);
-        mesInicioDeuda = parseInt(partes[1], 10) - 1; // Base 0 (Enero = 0)
-      }
-
+      // Calculamos cuántos meses han transcurrido desde su mes de inicio exigible hasta el mes ACTUAL
       const mesesTranscurridos = (anoActual - anoInicioDeuda) * 12 + (mesActual - mesInicioDeuda) + 1;
+
+      // REGLA DE MOROSIDAD AMIGABLE: El mes en curso NO cuenta como deuda pendiente para la lista de morosos.
       const mesesExigiblesVencidos = mesesTranscurridos - 1;
 
+      // Buscamos si en la base de datos ya pagó el mes actual compacto (Ej: "2026-10")
       const pagosAlumno = pagos.filter(p => p.alumno_id === alumno.id);
       const mesActualFormato = `${anoActual}-${String(mesActual + 1).padStart(2, '0')}`;
       const yaPagoMesActual = pagosAlumno.some(p => p.mes_pagado === mesActualFormato);
 
+      // Si el alumno es nuevo y no tiene meses exigibles vencidos aún
       if (mesesExigiblesVencidos <= 0) {
         if (yaPagoMesActual) {
           listaSolventes.push(alumno);
@@ -176,14 +174,17 @@ router.get('/dashboard', async (req, res) => {
         return; 
       }
 
+      // Buscar qué meses ha pagado el alumno en la base de datos
       const mesesPagados = pagosAlumno.length;
+
+      // La deuda real son los meses del pasado que ya cerraron y que aún no ha pagado
       const mesesDeuda = mesesExigiblesVencidos - mesesPagados;
 
       if (mesesDeuda > 0) {
         listaMorosos.push({
           ...alumno,
           mesesDeuda: mesesDeuda,
-          montoDolares: mesesDeuda * 15, 
+          montoDolares: mesesDeuda * 15, // Costo de la matrícula de fútbol
           alertaCritica: mesesDeuda > 1 
         });
       } else {
@@ -238,21 +239,21 @@ router.get('/dashboard', async (req, res) => {
       }
     ];
 
-    // Cabeceras anti-caché robustas para navegadores móviles y Render
+    // Cabeceras HTTP óptimas anti-caché móviles
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
 
-    // RETORNO DE DATOS LIMPIOS PARA EL FRONTEND
+    // RETORNO: Conservamos la misma estructura de salida exacta que espera tu Selección.jsx
     return res.status(200).json({
       total_activos: alumnos.length,
       total_morosos: listaMorosos.length,
-      total_pendientes: listaPendientes.length,
-      total_solventes: listaSolventes.length,
+      total_pendientes: listaPendientes.length,  
+      total_solventes: listaSolventes.length,    
       monto_por_recaudar: listaMorosos.reduce((sum, m) => sum + m.montoDolares, 0),
       morosos: listaMorosos,
-      pendientes: listaPendientes,
-      solventes: listaSolventes,
+      pendientes: listaPendientes,                 
+      solventes: listaSolventes,                   
       turnos_manana,
       turnos_tarde
     });

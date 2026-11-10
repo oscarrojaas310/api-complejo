@@ -295,13 +295,26 @@ router.put('/alumnos/:id', async (req, res) => {
 
   try {
     // 📊 Cálculo dinámico del nivel/categoría basado en el horario asignado
+    // 📊 Cálculo dinámico e inequívoco de la categoría basado en el horario exacto
     let nivelAutomatico = 'Sub-6';
-    if (horario_asignado.includes('03:00 PM')) nivelAutomatico = 'Sub-8';
-    if (horario_asignado.includes('04:00 PM')) nivelAutomatico = 'Sub-10';
-    if (horario_asignado.includes('05:00 PM')) nivelAutomatico = 'Sub-12';
-    if (horario_asignado.includes('06:00 PM')) nivelAutomatico = 'Sub-14';
-    if (horario_asignado.includes('08:00 AM')) nivelAutomatico = 'Rango 9 a 14 años (Mañana)';
-    if (horario_asignado.includes('09:15 AM')) nivelAutomatico = 'Rango 5 a 8 años (Mañana)';
+    const horarioLimpio = horario_asignado.trim();
+
+    if (horarioLimpio === 'Lunes, Miércoles y Viernes: 03:00 PM') {
+      nivelAutomatico = 'Sub-8';
+    } else if (horarioLimpio === 'Lunes, Martes y Jueves: 04:00 PM') {
+      nivelAutomatico = 'Sub-10';
+    } else if (horarioLimpio === 'Lunes, Miércoles y Viernes: 05:00 PM - 06:00 PM') {
+      nivelAutomatico = 'Sub-12';
+    } else if (horarioLimpio === 'Lunes, Miércoles y Viernes: 06:00 PM - 07:00 PM') {
+      nivelAutomatico = 'Sub-14';
+    } else if (horarioLimpio === 'Lunes, Miércoles y Viernes: 08:00 AM - 09:15 AM') {
+      nivelAutomatico = 'Rango 9 a 14 años (Mañana)';
+    } else if (horarioLimpio === 'Lunes, Miércoles y Viernes: 09:15 AM - 10:30 AM') {
+      nivelAutomatico = 'Rango 5 a 8 años (Mañana)';
+    } else if (horarioLimpio.includes('2:00 PM') || horarioLimpio.includes('Sub-6')) {
+      nivelAutomatico = 'Sub-6';
+    }
+
 
     // 2. Sentencia SQL corregida incorporando la columna 'nivel'
     const queryText = `

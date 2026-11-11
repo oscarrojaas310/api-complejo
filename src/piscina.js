@@ -53,11 +53,11 @@ router.post('/inscripciones', async (req, res) => {
       nivel,
       horario_asignado // <-- Corregido aquí, solo la variable
     ];
-
-    await pool.query(queryText, values);
+    const [resultado] = await pool.query(queryText, values);
 
     return res.status(201).json({
-      mensaje: '¡Alumno registrado en la nube de Aiven con éxito (MySQL)!'
+      mensaje: '¡Alumno registrado en la nube de Aiven con éxito (MySQL)!',
+      id: resultado.insertId // 👈 Clave para enlazar pagos o asistencias creados offline
     });
 
   } catch (error) {

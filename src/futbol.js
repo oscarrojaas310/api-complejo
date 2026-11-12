@@ -103,11 +103,12 @@ router.post('/inscripciones', async (req, res) => {
       horario_asignado
     ];
 
-    await pool.query(queryText, values);
+const [resultado] = await pool.query(queryText, values);
 
-    return res.status(201).json({
-      mensaje: '¡Atleta registrado en la nube de fútbol con éxito (MySQL)!'
-    });
+return res.status(201).json({
+  mensaje: '¡Atleta registrado con éxito!',
+  id: resultado.insertId // 👈 Asegura que el pago offline reciba el ID real de MySQL
+});
 
   } catch (error) {
     console.error('❌ Error al insertar en MySQL (Fútbol):', error);

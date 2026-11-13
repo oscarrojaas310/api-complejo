@@ -17,7 +17,7 @@ const pool = mysql.createPool({
 
 pool.query('SELECT NOW()')
   .then(() => {
-    console.log('🌐 ¡Enlace seguro establecido con MySQL en Aiven (Nueva York)!');
+    console.log('🌐 ¡Enlace seguro establecido con MySQL TiDB Cloud!');
   })
   .catch((err) => {
     console.error('❌ Error crítico al conectar con el MySQL de Aiven:', err.message);

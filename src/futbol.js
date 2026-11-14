@@ -373,7 +373,7 @@ router.put('/alumnos/:id', async (req, res) => {
     });
   }
 });
-
+// POST: Registrar pagos de mensualidades de fútbol (ID CONSECUTIVO + MONTO BS MANUAL + RETROACTIVO OFFLINE)
 router.post('/pagos', async (req, res) => {
   const { 
     alumno_id, 
@@ -383,57 +383,71 @@ router.post('/pagos', async (req, res) => {
     metodo_pago, 
     referencia, 
     mes_pagado, 
-    fecha_registro, // 💡 Clave absoluta para el modo offline
+    fecha_registro, 
     guardado_offline 
   } = req.body;
 
-  if (!alumno_id || !monto_dolares || !metodo_pago || !mes_pagado || !tasa_bcv) {
+  if (!alumno_id || !monto_dolares || !metodo_pago || !mes_pagado) {
     return res.status(400).json({ error: 'Faltan campos obligatorios para procesar el pago de fútbol.' });
   }
 
   const referenciaFinal = referencia && referencia !== 'N/A' ? referencia : 'N/A';
   const guardadoOfflineFinal = guardado_offline ? 1 : 0;
 
+  // ✅ Incluimos explícitamente la columna `id` en el INSERT
   const query = `
     INSERT INTO pagos_futbol 
-    (alumno_id, monto_dolares, tasa_bcv, monto_bolivares, metodo_pago, referencia, mes_pagado, guardado_offline, fecha_registro) 
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (id, alumno_id, monto_dolares, tasa_bcv, monto_bolivares, metodo_pago, referencia, mes_pagado, guardado_offline, fecha_registro) 
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
+  const conexion = await pool.getConnection();
+
   try {
-    // 🧠 ESTRATEGIA OFFLINE: Determinar el tiempo base según el origen del payload
-    // Si viene de la cola offline, usamos su marca de tiempo congelada; si es online, el instante actual.
+    await conexion.beginTransaction();
+
+    // 1. Consultamos el último ID real de `pagos_futbol` bloqueando la lectura por milisegundos
+    const [filasMax] = await conexion.query('SELECT COALESCE(MAX(id), 0) + 1 AS siguienteId FROM pagos_futbol FOR UPDATE');
+    let idActual = filasMax.siguienteId;
+
+    // 2. Determinar el tiempo base según el origen del payload (congelado si viene offline)
     const tiempoOrigen = fecha_registro ? new Date(fecha_registro) : new Date();
-    
     const mesOrigenIndex = tiempoOrigen.getMonth(); 
     const anoOrigen = tiempoOrigen.getFullYear();
-    
-    // El mes objetivo se calcula relativo al momento en que se hizo el click en el teléfono
     const mesOrigenFormato = `${anoOrigen}-${String(mesOrigenIndex + 1).padStart(2, '0')}`;
-
-    // Saneamiento de marcas de tiempo ISO para MySQL
     const fechaLimpiaMySQL = tiempoOrigen.toISOString().replace('T', ' ').substring(0, 19);
+
+    const tasaSegura = parseFloat(tasa_bcv) || 1;
+    const bsTotalManual = parseFloat(monto_bolivares) || 0;
 
     // =========================================================================
     // CASO 1: Ponerse al Día Total (Deuda Vieja + Mes donde ocurrió el Pago)
     // =========================================================================
     if (mes_pagado === "Ponerse al Día Total" || mes_pagado.includes("Ponerse al Día")) {
-      const cantidadTotalFilas = Math.round(parseFloat(monto_dolares) / 15);
+      const cantidadTotalFilas = Math.max(1, Math.round(parseFloat(monto_dolares) / 15));
       const mesesDeDeudaViejos = cantidadTotalFilas - 1; 
+      const bsPorMes = bsTotalManual > 0 ? (bsTotalManual / cantidadTotalFilas).toFixed(2) : 0;
 
       // Insertamos hacia atrás partiendo del mes de origen congelado
       for (let i = 0; i < mesesDeDeudaViejos; i++) {
         let targetMesIndex = mesOrigenIndex - 1 - i;
         let targetAno = anoOrigen;
-        while (targetMesIndex < 0) { targetMesIndex += 12; targetAno--; } // Bucle Seguro
+        while (targetMesIndex < 0) { targetMesIndex += 12; targetAno--; }
         
         const mesFormateadoCorto = `${targetAno}-${String(targetMesIndex + 1).padStart(2, '0')}`;
-        await pool.query(query, [parseInt(alumno_id, 10), 15.00, parseFloat(tasa_bcv), 15.00 * parseFloat(tasa_bcv), metodo_pago, referenciaFinal, mesFormateadoCorto, guardadoOfflineFinal, fechaLimpiaMySQL]);
+        await conexion.query(query, [
+          idActual++, parseInt(alumno_id, 10), 15.00, tasaSegura, bsPorMes, 
+          metodo_pago, referenciaFinal, mesFormateadoCorto, guardadoOfflineFinal, fechaLimpiaMySQL
+        ]);
       }
 
-      // Insertamos el mes de origen (Noviembre si se pagó en Noviembre, así sincronice en Diciembre)
-      await pool.query(query, [parseInt(alumno_id, 10), 15.00, parseFloat(tasa_bcv), 15.00 * parseFloat(tasa_bcv), metodo_pago, referenciaFinal, mesOrigenFormato, guardadoOfflineFinal, fechaLimpiaMySQL]);
+      // Insertamos el mes de origen
+      await conexion.query(query, [
+        idActual, parseInt(alumno_id, 10), 15.00, tasaSegura, bsPorMes, 
+        metodo_pago, referenciaFinal, mesOrigenFormato, guardadoOfflineFinal, fechaLimpiaMySQL
+      ]);
 
+      await conexion.commit();
       return res.status(201).json({ mensaje: '¡Cuenta liquidada por completo de forma retroactiva!' });
     }
 
@@ -441,7 +455,8 @@ router.post('/pagos', async (req, res) => {
     // CASO 2: Abonar meses de deuda (Únicamente ciclos vencidos hacia atrás)
     // =========================================================================
     if (mes_pagado.includes("Abonar 1 Mes") || mes_pagado.includes("Pagar 2 Meses") || mes_pagado.includes("Pagar Toda la Deuda") || mes_pagado.includes("Pendiente")) {
-      const mesesViejosAPagar = Math.round(parseFloat(monto_dolares) / 15);
+      const mesesViejosAPagar = Math.max(1, Math.round(parseFloat(monto_dolares) / 15));
+      const bsPorMes = bsTotalManual > 0 ? (bsTotalManual / mesesViejosAPagar).toFixed(2) : 0;
 
       for (let i = 0; i < mesesViejosAPagar; i++) {
         let targetMesIndex = mesOrigenIndex - 1 - i;
@@ -449,32 +464,41 @@ router.post('/pagos', async (req, res) => {
         while (targetMesIndex < 0) { targetMesIndex += 12; targetAno--; }
         
         const mesFormateadoCorto = `${targetAno}-${String(targetMesIndex + 1).padStart(2, '0')}`;
-        await pool.query(query, [parseInt(alumno_id, 10), 15.00, parseFloat(tasa_bcv), 15.00 * parseFloat(tasa_bcv), metodo_pago, referenciaFinal, mesFormateadoCorto, guardadoOfflineFinal, fechaLimpiaMySQL]);
+        await conexion.query(query, [
+          idActual++, parseInt(alumno_id, 10), 15.00, tasaSegura, bsPorMes, 
+          metodo_pago, referenciaFinal, mesFormateadoCorto, guardadoOfflineFinal, fechaLimpiaMySQL
+        ]);
       }
 
+      await conexion.commit();
       return res.status(201).json({ mensaje: 'Abono a la deuda de fútbol registrado retroactivamente.' });
     }
 
     // =========================================================================
-    // CASO 3: Mensualidad regular estándar o monto manual digitado
+    // CASO 3: Mensualidad regular estándar del mes en curso
     // =========================================================================
-    const [result] = await pool.query(query, [
+    await conexion.query(query, [
+      idActual,
       parseInt(alumno_id, 10), 
       parseFloat(monto_dolares), 
-      parseFloat(tasa_bcv), 
-      parseFloat(monto_bolivares), 
+      tasaSegura, 
+      bsTotalManual, 
       metodo_pago, 
       referenciaFinal, 
-      mesOrigenFormato, // 💡 Mantiene consistencia temporal
+      mesOrigenFormato, 
       guardadoOfflineFinal, 
       fechaLimpiaMySQL
     ]);
-    
-    return res.status(201).json({ mensaje: 'Mensualidad asentada con éxito.', pagoId: result.insertId });
+
+    await conexion.commit();
+    return res.status(201).json({ mensaje: 'Mensualidad asentada con éxito.', pagoId: idActual });
 
   } catch (error) {
-    console.error('❌ Error crítico en pagos offline-ready:', error);
+    await conexion.rollback();
+    console.error('❌ Error crítico en pagos offline-ready de fútbol:', error);
     return res.status(500).json({ error: 'Error interno en el servidor.', detallesSQL: error.message });
+  } finally {
+    conexion.release();
   }
 });
 

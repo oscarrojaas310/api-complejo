@@ -3,7 +3,7 @@ const router = express.Router();
 const pool = require('./db'); // Importa el pool de MySQL
 const path = require('path'); 
 
-// POST: Registrar matrícula de alumno en la piscina
+// POST: Registrar matrícula de alumno en la piscina con ID consecutivo blindado
 router.post('/inscripciones', async (req, res) => {
   const {
     nombre_alumno,
@@ -24,10 +24,19 @@ router.post('/inscripciones', async (req, res) => {
   }
 
   const horario_asignado = req.body.horario_asignado;
+  const conexion = await pool.getConnection(); // Abrimos conexión dedicada para evitar choques
 
   try {
+    await conexion.beginTransaction();
+
+    // 1. Consultamos el último ID real de la tabla bloqueando la lectura por milisegundos
+    const [filasMax] = await conexion.query('SELECT COALESCE(MAX(id), 0) + 1 AS siguienteId FROM alumnos FOR UPDATE');
+    const siguienteId = filasMax[0].siguienteId;
+
+    // 2. Insertamos incluyendo explícitamente la columna `id` con ese número consecutivo
     const queryText = `
       INSERT INTO alumnos (
+        id,
         nombre_alumno, 
         edad_alumno, 
         direccion, 
@@ -39,10 +48,11 @@ router.post('/inscripciones', async (req, res) => {
         horario_asignado,
         registrado_el
       ) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW());
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW());
     `;
 
-       const values = [
+    const values = [
+      siguienteId,
       nombre_alumno,
       parseInt(edad_alumno, 10),
       direccion,
@@ -51,20 +61,25 @@ router.post('/inscripciones', async (req, res) => {
       cedula_representante,
       telefono_representante,
       nivel,
-      horario_asignado // <-- Corregido aquí, solo la variable
+      horario_asignado
     ];
-    const [resultado] = await pool.query(queryText, values);
+
+    await conexion.query(queryText, values);
+    await conexion.commit();
 
     return res.status(201).json({
-      mensaje: '¡Alumno registrado en la nube de Aiven con éxito (MySQL)!',
-      id: resultado.insertId // 👈 Clave para enlazar pagos o asistencias creados offline
+      mensaje: '¡Alumno registrado en la nube con éxito!',
+      id: siguienteId // 👈 Devuelve el ID consecutivo exacto (ej. 133) al modo offline
     });
 
   } catch (error) {
-    console.error('Error al insertar en MySQL:', error);
+    await conexion.rollback();
+    console.error('❌ Error al insertar en MySQL:', error);
     return res.status(500).json({ 
       error: 'Error interno en el servidor al guardar la matrícula.' 
     });
+  } finally {
+    conexion.release(); // Liberamos la conexión siempre
   }
 });
 
@@ -656,10 +671,7 @@ router.get('/alumnos/:id/recibo-pdf', async (req, res) => {
   }
 });
 
-
-
-
-// POST: Registrar pagos de mensualidades de forma individual o masiva (LÓGICA BLINDADA Y CORREGIDA)
+// POST: Registrar pagos de mensualidades de forma individual o masiva (ID CONSECUTIVO + MONTO BS MANUAL)
 router.post('/pagos', async (req, res) => {
   const { 
     alumno_id, 
@@ -681,73 +693,93 @@ router.post('/pagos', async (req, res) => {
   const guardado_offline = 0; 
   const creado_por = 'Admin'; 
 
+  // ✅ Incluimos explícitamente la columna `id` en el INSERT
   const query = `
     INSERT INTO pagos 
-    (alumno_id, monto_dolares, tasa_bcv, monto_bolivares, metodo_pago, estado, guardado_offline, creado_por, mes_pagado, fecha_registro) 
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (id, alumno_id, monto_dolares, tasa_bcv, monto_bolivares, metodo_pago, estado, guardado_offline, creado_por, mes_pagado, fecha_registro) 
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
+  const conexion = await pool.getConnection();
+
   try {
+    await conexion.beginTransaction();
+
+    // 1. Consultamos el último ID real de `pagos` bloqueando la lectura por milisegundos
+    const [filasMax] = await conexion.query('SELECT COALESCE(MAX(id), 0) + 1 AS siguienteId FROM pagos FOR UPDATE');
+    let idActual = filasMax[0].siguienteId;
+
     const hoy = new Date();
     const mesActualIndex = hoy.getMonth(); 
     const anoActual = hoy.getFullYear();
-    
-    // Formato estandarizado del mes en curso (Ej: "2026-10")
     const mesActualFormato = `${anoActual}-${String(mesActualIndex + 1).padStart(2, '0')}`;
 
-    // =========================================================================
-    // SANEAMIENTO GLOBAL DE FECHA: Convierte '2026-10-17T19:02:04.024Z' a '2026-10-17 19:02:04'
-    // =========================================================================
     const fechaLimpiaMySQL = fecha_registro 
       ? fecha_registro.replace('T', ' ').substring(0, 19) 
       : hoy.toISOString().replace('T', ' ').substring(0, 19);
 
+    const tasaSegura = parseFloat(tasa_bcv) || 1;
+    const bsTotalManual = parseFloat(monto_bolivares) || 0;
+
     // --- LÓGICA DE DETECCIÓN FINANCIERA ---
     
-    // CASO 1: El administrador eligió pagar la deuda Y ADEMÁS el mes actual para estar 100% Al Día
+    // CASO 1: Pagar deuda acumulada + mes actual ("Ponerse al Día Total")
     if (mes_pagado === "Ponerse al Día Total") {
-      const cantidadTotalFilas = Math.round(monto_dolares / 20);
+      const cantidadTotalFilas = Math.max(1, Math.round(monto_dolares / 20));
       const mesesDeDeudaViejos = cantidadTotalFilas - 1; 
+      const bsPorMes = bsTotalManual > 0 ? (bsTotalManual / cantidadTotalFilas).toFixed(2) : 0;
 
-      // 1. Insertamos los meses viejos de la deuda hacia atrás (Septiembre, Agosto, etc.)
+      // Insertamos los meses viejos de la deuda hacia atrás incrementando idActual++
       for (let i = 0; i < mesesDeDeudaViejos; i++) {
         let targetMesIndex = mesActualIndex - 1 - i;
         let targetAno = anoActual;
-        if (targetMesIndex < 0) { targetMesIndex += 12; targetAno--; }
+        while (targetMesIndex < 0) { targetMesIndex += 12; targetAno--; }
         
         const mesFormateadoCorto = `${targetAno}-${String(targetMesIndex + 1).padStart(2, '0')}`;
-        await pool.query(query, [parseInt(alumno_id, 10), 20.00, parseFloat(tasa_bcv), 20.00 * parseFloat(tasa_bcv), metodoPagoFinal, estado, guardado_offline, creado_por, mesFormateadoCorto, fechaLimpiaMySQL]);
+        await conexion.query(query, [
+          idActual++, parseInt(alumno_id, 10), 20.00, tasaSegura, bsPorMes, 
+          metodoPagoFinal, estado, guardado_offline, creado_por, mesFormateadoCorto, fechaLimpiaMySQL
+        ]);
       }
 
-      // 2. Insertamos la fila del mes actual (Octubre)
-      await pool.query(query, [parseInt(alumno_id, 10), 20.00, parseFloat(tasa_bcv), 20.00 * parseFloat(tasa_bcv), metodoPagoFinal, estado, guardado_offline, creado_por, mesActualFormato, fechaLimpiaMySQL]);
+      // Insertamos la fila del mes actual
+      await conexion.query(query, [
+        idActual, parseInt(alumno_id, 10), 20.00, tasaSegura, bsPorMes, 
+        metodoPagoFinal, estado, guardado_offline, creado_por, mesActualFormato, fechaLimpiaMySQL
+      ]);
 
+      await conexion.commit();
       return res.status(201).json({ mensaje: '¡Cuenta liquidada por completo! El alumno ahora es Solvente.' });
     }
 
-    // CASO 2: El administrador eligió abonar meses de la deuda, pero SIN incluir el mes actual
+    // CASO 2: Abonar meses de la deuda sin incluir el mes actual
     if (mes_pagado.includes("Abonar 1 Mes") || mes_pagado.includes("Pagar 2 Meses") || mes_pagado.includes("Pagar Toda la Deuda")) {
-      const mesesViejosAPagar = Math.round(monto_dolares / 20);
+      const mesesViejosAPagar = Math.max(1, Math.round(monto_dolares / 20));
+      const bsPorMes = bsTotalManual > 0 ? (bsTotalManual / mesesViejosAPagar).toFixed(2) : 0;
 
-      // Insertamos únicamente los meses de la deuda hacia atrás
       for (let i = 0; i < mesesViejosAPagar; i++) {
         let targetMesIndex = mesActualIndex - 1 - i;
         let targetAno = anoActual;
-        if (targetMesIndex < 0) { targetMesIndex += 12; targetAno--; }
+        while (targetMesIndex < 0) { targetMesIndex += 12; targetAno--; }
         
         const mesFormateadoCorto = `${targetAno}-${String(targetMesIndex + 1).padStart(2, '0')}`;
-        await pool.query(query, [parseInt(alumno_id, 10), 20.00, parseFloat(tasa_bcv), 20.00 * parseFloat(tasa_bcv), metodoPagoFinal, estado, guardado_offline, creado_por, mesFormateadoCorto, fechaLimpiaMySQL]);
+        await conexion.query(query, [
+          idActual++, parseInt(alumno_id, 10), 20.00, tasaSegura, bsPorMes, 
+          metodoPagoFinal, estado, guardado_offline, creado_por, mesFormateadoCorto, fechaLimpiaMySQL
+        ]);
       }
 
+      await conexion.commit();
       return res.status(201).json({ mensaje: 'Abono a la deuda registrado. El alumno pasará a estado Pendiente.' });
     }
 
-    // CASO 3: El alumno ya estaba al día (Pendiente) y solo va a pagar su mes actual regular de \$20
-    const [result] = await pool.query(query, [
+    // CASO 3: Mensualidad regular del mes actual
+    await conexion.query(query, [
+      idActual,
       parseInt(alumno_id, 10), 
       parseFloat(monto_dolares), 
-      parseFloat(tasa_bcv), 
-      parseFloat(monto_bolivares), 
+      tasaSegura, 
+      bsTotalManual, 
       metodoPagoFinal, 
       estado, 
       guardado_offline, 
@@ -755,14 +787,19 @@ router.post('/pagos', async (req, res) => {
       mesActualFormato, 
       fechaLimpiaMySQL
     ]);
-    
-    return res.status(201).json({ mensaje: 'Mensualidad regular asentada con éxito.', pagoId: result.insertId });
+
+    await conexion.commit();
+    return res.status(201).json({ mensaje: 'Mensualidad regular asentada con éxito.', pagoId: idActual });
 
   } catch (error) {
-    console.error('❌ Error crítico en la inserción SQL en Aiven:', error);
+    await conexion.rollback();
+    console.error('❌ Error crítico en la inserción SQL de pagos:', error);
     return res.status(500).json({ error: 'Error interno en el servidor.', detallesSQL: error.message });
+  } finally {
+    conexion.release();
   }
 });
+
 
 
 router.get('/alumnos-lista', async (req, res) => {

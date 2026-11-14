@@ -1,4 +1,4 @@
-const mysql = require('mysql2');
+/*const mysql = require('mysql2');
 require('dotenv').config();
 
 const pool = mysql.createPool({
@@ -24,7 +24,7 @@ pool.query('SELECT NOW()')
   });
 
 module.exports = pool;
-/*
+*/
 
 // src/db.js - Configuración inteligente para XAMPP (Local) y Aiven (Nube)
 const mysql = require('mysql2');
@@ -62,4 +62,3 @@ pool.query('SELECT NOW()')
   });
 
 module.exports = pool;
-*/

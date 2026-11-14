@@ -1138,8 +1138,7 @@ router.get('/eventos/:id/pdf', async (req, res) => {
     return res.status(500).send('Error interno del servidor al procesar el archivo imprimible.');
   }
 });
-
-// ENDPOINT: Registrar la asistencia diaria de todo un turno en bloque masivo
+// ENDPOINT: Registrar la asistencia diaria de todo un turno en bloque masivo (ID CONSECUTIVO BLINDADO)
 router.post('/asistencia-diaria', async (req, res) => {
   const { fecha, horario, bloque, registros } = req.body;
 
@@ -1148,35 +1147,53 @@ router.post('/asistencia-diaria', async (req, res) => {
     return res.status(400).json({ error: 'Estructura de reporte incompleta o inválida.' });
   }
 
-  // Obtenemos una conexión limpia del pool para manejar la transacción
   const conexion = await pool.getConnection();
 
   try {
-    // 🚀 Arrancamos la transacción de seguridad masiva
     await conexion.beginTransaction();
 
-    console.log(`⏳ Procesando asistencia para el turno ${horario} del día ${fecha}...`);
+    // 1. Consultamos el último ID real de la tabla `asistencias` bloqueando la lectura por milisegundos
+    const [filasMax] = await conexion.query('SELECT COALESCE(MAX(id), 0) + 1 AS siguienteId FROM asistencias FOR UPDATE');
+    let idActual = filasMax[0].siguienteId;
+
+    // 2. Incluimos `id` en el INSERT, y si el alumno ya tenía registro ese día, actualizamos sin gastar un nuevo ID
     const querySQL = `
-  INSERT INTO asistencias (alumno_id, fecha, horario, bloque, asistio) 
-  VALUES (?, ?, ?, ?, ?)
-  ON DUPLICATE KEY UPDATE 
-    asistio = VALUES(asistio),
-    bloque = VALUES(bloque)
-`;
+      INSERT INTO asistencias (id, alumno_id, fecha, horario, bloque, asistio) 
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE 
+        asistio = VALUES(asistio),
+        bloque = VALUES(bloque),
+        horario = VALUES(horario)
+    `;
 
-
-    // Ejecutamos cada inserción de forma consecutiva dentro de la misma transacción
+    // 3. Ejecutamos cada inserción verificando si el registro ya existía para no desperdiciar números
     for (const reg of registros) {
-      await conexion.query(querySQL, [
-        parseInt(reg.alumno_id, 10),
-        fecha,
-        horario,
-        bloque,
-        parseInt(reg.asistio, 10)
-      ]);
+      const alumnoId = parseInt(reg.alumno_id, 10);
+      const asistioVal = parseInt(reg.asistio, 10);
+
+      // Verificamos si ya existe asistencia para ese alumno en esa fecha (evita consumir idActual++ si es una edición)
+      const [existe] = await conexion.query(
+        'SELECT id FROM asistencias WHERE alumno_id = ? AND fecha = ? LIMIT 1',
+        [alumnoId, fecha]
+      );
+
+      if (existe.length > 0) {
+        await conexion.query(
+          'UPDATE asistencias SET asistio = ?, bloque = ?, horario = ? WHERE id = ?',
+          [asistioVal, bloque, horario, existe[0].id]
+        );
+      } else {
+        await conexion.query(querySQL, [
+          idActual++,
+          alumnoId,
+          fecha,
+          horario,
+          bloque,
+          asistioVal
+        ]);
+      }
     }
 
-    // 💾 Si todo salió bien, asentamos los cambios definitivamente en Aiven / XAMPP
     await conexion.commit();
     console.log(`✅ ¡Asistencia guardada con éxito! Total registros asentados: ${registros.length}`);
     
@@ -1186,7 +1203,6 @@ router.post('/asistencia-diaria', async (req, res) => {
     });
 
   } catch (error) {
-    // 🛡️ Si algo colapsó o falló la red, revertimos todo para no corromper la tabla
     await conexion.rollback();
     console.error('❌ Error crítico en transacción de asistencia:', error);
     
@@ -1195,7 +1211,6 @@ router.post('/asistencia-diaria', async (req, res) => {
       detalle: error.message 
     });
   } finally {
-    // 🔌 Devolvemos la conexión al pool de inmediato para que quede libre para otros usuarios
     conexion.release();
   }
 });

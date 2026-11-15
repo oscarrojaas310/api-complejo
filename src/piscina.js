@@ -110,7 +110,7 @@ router.get('/dashboard', async (req, res) => {
       'Martes a Jueves: 03:00 PM - 04:00 PM': 0, 
       'Martes a Jueves: 04:00 PM - 05:00 PM': 0, 
       'Martes a Jueves: 05:00 PM - 06:00 PM': 0, 
-      'Martes a Jueves: 06:00 PM - 07:00 PM': 0 
+      'Martes a Jueves: 06:00 PM - 07:00 PM': 0, 
       'Martes a Jueves: 07:00 PM - 08:00 PM': 0 
     };
 
@@ -175,20 +175,19 @@ router.get('/dashboard', async (req, res) => {
       alumnos: turnosMañanaCount[h] 
     }));
 
-    const turnos_tarde = Object.keys(turnosTardeCount).map(h => {
-      let nivelAsignado = 'Iniciación / Adaptación';
-      if (h.includes('03:00 PM') || h.includes('04:00 PM')) nivelAsignado = 'Infantil / Estilos';
-      if (h.includes('05:00 PM') || h.includes('06:00 PM')) nivelAsignado = 'Juvenil y Adultos / Avanzado';
+const turnos_tarde = Object.keys(turnosTardeCount).map(h => {
+  let nivelAsignado = 'Iniciación / Adaptación';
+  if (h.includes('03:00 PM') || h.includes('04:00 PM')) nivelAsignado = 'Infantil / Estilos';
+  if (h.includes('05:00 PM') || h.includes('06:00 PM') || h.includes('07:00 PM')) nivelAsignado = 'Juvenil y Adultos / Avanzado';
 
-      // Extraemos solo las horas para que la visual en el frontend quede limpia
-      const horarioLimpio = h.replace('Martes a Jueves: ', '');
+  const horarioLimpio = h.replace('Martes a Jueves: ', '');
 
-      return { 
-        horario: horarioLimpio, 
-        nivel: nivelAsignado, 
-        alumnos: turnosTardeCount[h] 
-      };
-    });
+  return { 
+    horario: horarioLimpio, 
+    nivel: nivelAsignado, 
+    alumnos: turnosTardeCount[h] 
+  };
+});
 
 
     // RETORNO: Agregamos de manera limpia las nuevas variables al objeto JSON de salida

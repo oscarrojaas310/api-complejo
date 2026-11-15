@@ -111,6 +111,7 @@ router.get('/dashboard', async (req, res) => {
       'Martes a Jueves: 04:00 PM - 05:00 PM': 0, 
       'Martes a Jueves: 05:00 PM - 06:00 PM': 0, 
       'Martes a Jueves: 06:00 PM - 07:00 PM': 0 
+      'Martes a Jueves: 07:00 PM - 08:00 PM': 0 
     };
 
     alumnos.forEach(alumno => {

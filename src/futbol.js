@@ -1153,7 +1153,7 @@ router.get('/exportar-turno-pdf', async (req, res) => {
       [horarioLimpio, `%${horarioLimpio}%`]
     );
 
-    const categoriaNombre = atletas.length > 0 ? atletas.nivel : 'Categoría General';
+    const categoriaNombre = atletas.length > 0 ? atletas[0].nivel : 'Categoría General';
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=Nomina_Futbol_${encodeURIComponent(horario)}.pdf`);
@@ -1175,7 +1175,7 @@ router.get('/exportar-turno-pdf', async (req, res) => {
     // 2. BANNER DE INFORMACIÓN DEL TURNO Y CATEGORÍA (Debajo del cintillo)
     doc.roundedRect(40, 105, 532, 46, 6).fill('#065f46');
     doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(12)
-       .text('NÓMINA OFICIAL DE ATLETAS POR TURNO', 52, 113);
+       .text('NÓMINA OFICIAL DE ATLETAS', 52, 113);
     doc.font('Helvetica').fontSize(8.5)
        .text(`Categoría: ${categoriaNombre}  |  Horario: ${horario}`, 52, 129);
     doc.font('Helvetica-Bold').fontSize(8.5)

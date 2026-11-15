@@ -405,10 +405,10 @@ router.post('/pagos', async (req, res) => {
 
   try {
     await conexion.beginTransaction();
-
     // 1. Consultamos el último ID real de `pagos_futbol` bloqueando la lectura por milisegundos
     const [filasMax] = await conexion.query('SELECT COALESCE(MAX(id), 0) + 1 AS siguienteId FROM pagos_futbol FOR UPDATE');
-    let idActual = filasMax.siguienteId;
+    let idActual = Number(filasMax[0]?.siguienteId || 1); // 👈 CLAVE: [0] para entrar al primer objeto del array
+
 
     // 2. Determinar el tiempo base según el origen del payload (congelado si viene offline)
     const tiempoOrigen = fecha_registro ? new Date(fecha_registro) : new Date();

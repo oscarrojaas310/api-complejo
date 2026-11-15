@@ -1103,6 +1103,92 @@ router.delete('/alumnos/:id', async (req, res) => {
   }
 });
 
+// GET: Exportar lista oficial de atletas por turno/horario en PDF (Fútbol)
+router.get('/exportar-turno-pdf', async (req, res) => {
+  const { horario } = req.query;
 
+  if (!horario) {
+    return res.status(400).send('Falta el parámetro de horario para generar la nómina.');
+  }
+
+  try {
+    // Buscamos todos los atletas inscritos en ese horario ordenados alfabéticamente
+    const [atletas] = await pool.query(
+      `SELECT id, nombre_alumno, edad_alumno, cedula_alumno, nombre_representante, telefono_representante, nivel 
+       FROM alumnos_futbol 
+       WHERE horario_asignado = ? 
+       ORDER BY nombre_alumno ASC`,
+      [horario]
+    );
+
+    const categoriaNombre = atletas.length > 0 ? atletas[0].nivel : 'Categoría General';
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename=Nomina_Futbol_${encodeURIComponent(horario)}.pdf`);
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+
+    const doc = new PDFDocument({ size: 'LETTER', margin: 40 });
+    doc.pipe(res);
+
+    // Banner Encabezado Verde Esmeralda (Fútbol)
+    doc.rect(40, 40, 532, 55).fill('#065f46');
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(14)
+       .text('ACADEMIA DE FÚTBOL LOS PINOS — NÓMINA OFICIAL', 55, 50);
+    doc.font('Helvetica').fontSize(9)
+       .text(`Categoría: ${categoriaNombre} | Horario: ${horario}`, 55, 68);
+    doc.fontSize(8)
+       .text(`Total Atletas: ${atletas.length} | Emitido: ${new Date().toLocaleDateString('es-VE')}`, 55, 80);
+
+    // Encabezado de Tabla
+    let y = 115;
+    doc.rect(40, y, 532, 22).fill('#e2e8f0');
+    doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(8);
+    doc.text('N°', 48, y + 7, { width: 25 });
+    doc.text('Nombre del Atleta', 75, y + 7, { width: 185 });
+    doc.text('Edad', 265, y + 7, { width: 35, align: 'center' });
+    doc.text('Representante', 305, y + 7, { width: 165 });
+    doc.text('Teléfono', 475, y + 7, { width: 90, align: 'right' });
+
+    y += 22;
+    doc.font('Helvetica').fontSize(8.5).fillColor('#0f172a');
+
+    if (atletas.length === 0) {
+      doc.text('No hay atletas registrados en este horario actualmente.', 48, y + 12);
+    } else {
+      atletas.forEach((atleta, index) => {
+        if (y > 700) {
+          doc.addPage({ size: 'LETTER', margin: 40 });
+          y = 40;
+        }
+
+        if (index % 2 === 0) {
+          doc.rect(40, y, 532, 20).fill('#f8fafc');
+          doc.fillColor('#0f172a');
+        }
+
+        doc.text(`${index + 1}`, 48, y + 6, { width: 25 });
+        doc.font('Helvetica-Bold').text(atleta.nombre_alumno, 75, y + 6, { width: 185, ellipsis: true });
+        doc.font('Helvetica').text(`${atleta.edad_alumno}a`, 265, y + 6, { width: 35, align: 'center' });
+        doc.text(atleta.nombre_representante, 305, y + 6, { width: 165, ellipsis: true });
+        doc.text(atleta.telefono_representante || 'N/A', 475, y + 6, { width: 90, align: 'right' });
+
+        doc.strokeColor('#f1f5f9').lineWidth(0.5).moveTo(40, y + 20).lineTo(572, y + 20).stroke();
+        y += 20;
+      });
+    }
+
+    // Pie de página
+    doc.strokeColor('#cbd5e1').lineWidth(1).moveTo(40, 730).lineTo(572, 730).stroke();
+    doc.fillColor('#94a3b8').fontSize(7.5)
+       .text('Documento oficial de control interno — Complejo Deportivo Los Pinos (Mérida, Venezuela).', 40, 740, { align: 'center' });
+
+    doc.end();
+  } catch (error) {
+    console.error('❌ Error al generar PDF de turno fútbol:', error);
+    if (!res.headersSent) {
+      res.status(500).send('Error interno al generar la lista del turno.');
+    }
+  }
+});
 
 module.exports = router;

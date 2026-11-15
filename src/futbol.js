@@ -787,7 +787,6 @@ router.get('/alumnos/:id/recibo-pdf', async (req, res) => {
     doc.text(`Meses Liquidados: ${mesesLiquidadosFinal}`, 40, 325); 
     doc.text(`Canal de Pago: ${pago.metodo_pago.toUpperCase()}`, 40, 340);
     doc.text(`Referencia Bancaria: ${pago.referencia}`, 40, 355);
-    doc.text(`Tasa de Cambio BCV: __________________ VES/USD`, 40, 370);
 
     // TABLA O CUADRO RESUMEN DE IMPORTES
     doc.roundedRect(40, 400, 510, 60, 8).fill('#f8fafc');
@@ -805,7 +804,7 @@ router.get('/alumnos/:id/recibo-pdf', async (req, res) => {
     // PIE DE PÁGINA INSTITUCIONAL
     doc.moveTo(40, 680).lineTo(550, 680).stroke('#cbd5e1');
     doc.fillColor('#94a3b8').font('Helvetica-Oblique').fontSize(8);
-    doc.text('Este documento digital sirve como comprobante legal de pago para la Academia de Fútbol Base Los Pinos.', 40, 695, { align: 'center' });
+    doc.text('Este documento digital sirve como comprobante legal de pago para Union Atletico Los Pinos F.C', 40, 695, { align: 'center' });
     doc.text('Generado automáticamente por el Sistema Administrativo de Control y Caja Los Pinos.', 40, 708, { align: 'center' });
 
     doc.end();

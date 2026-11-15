@@ -1396,7 +1396,8 @@ router.get('/exportar-turno-pdf', async (req, res) => {
       [horarioLimpio, `%${horarioLimpio}%`]
     );
 
-    const nivelNombre = alumnos.length > 0 ? alumnos.nivel : 'Nivel General';
+    const nivelNombre = alumnos.length > 0 ? alumnos[0].nivel : 'Nivel General';
+
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=Nomina_Piscina_${encodeURIComponent(horario)}.pdf`);

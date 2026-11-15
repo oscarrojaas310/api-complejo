@@ -708,14 +708,15 @@ router.post('/pagos', async (req, res) => {
     // 1. Consultamos el último ID real de `pagos` bloqueando la lectura por milisegundos
     const [filasMax] = await conexion.query('SELECT COALESCE(MAX(id), 0) + 1 AS siguienteId FROM pagos FOR UPDATE');
     let idActual = filasMax[0].siguienteId;
-    // Usa la fecha congelada del modo offline si viene, o la actual si es online
-    const tiempoOrigen = fecha_registro ? new Date(fecha_registro) : new Date();
-    const mesActualIndex = tiempoOrigen.getMonth(); 
-    const anoActual = tiempoOrigen.getFullYear();
+
+    const hoy = new Date();
+    const mesActualIndex = hoy.getMonth(); 
+    const anoActual = hoy.getFullYear();
     const mesActualFormato = `${anoActual}-${String(mesActualIndex + 1).padStart(2, '0')}`;
 
-    const fechaLimpiaMySQL = tiempoOrigen.toISOString().replace('T', ' ').substring(0, 19);
-
+    const fechaLimpiaMySQL = fecha_registro 
+      ? fecha_registro.replace('T', ' ').substring(0, 19) 
+      : hoy.toISOString().replace('T', ' ').substring(0, 19);
 
     const tasaSegura = parseFloat(tasa_bcv) || 1;
     const bsTotalManual = parseFloat(monto_bolivares) || 0;

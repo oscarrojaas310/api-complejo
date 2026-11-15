@@ -626,7 +626,7 @@ router.get('/alumnos/:id/recibo-pdf', async (req, res) => {
     doc.text('Estatus: ORIGINAL / APROBADO ✅', 400, 155, { align: 'right' });
 
     // Sección 1: Identificación del Alumno
-    doc.fillColor('#1d4ed8').font('Helvetica-Bold').fontSize(12).text('1. INFORMACIÓN DEL ALUMNO - ÁREA PISCINA', 40, 185);
+    doc.fillColor('#065f46').font('Helvetica-Bold').fontSize(12).text('1. INFORMACIÓN DEL ALUMNO - ÁREA PISCINA', 40, 185);
     doc.moveTo(40, 200).lineTo(550, 200).stroke('#f1f5f9');
 
     doc.fillColor('#1e293b').font('Helvetica').fontSize(10);
@@ -640,7 +640,7 @@ router.get('/alumnos/:id/recibo-pdf', async (req, res) => {
     doc.text(`Teléfono: ${alumno.telefono_representante}`, 300, 245);
 
     // Sección 2: Detalles de Facturación
-    doc.fillColor('#1d4ed8').font('Helvetica-Bold').fontSize(12).text('2. DETALLES DE FACTURACIÓN', 40, 295);
+    doc.fillColor('#065f46').font('Helvetica-Bold').fontSize(12).text('2. DETALLES DE FACTURACIÓN', 40, 295);
     doc.moveTo(40, 310).lineTo(550, 310).stroke('#f1f5f9');
 
     doc.fillColor('#1e293b').font('Helvetica');
@@ -652,7 +652,7 @@ router.get('/alumnos/:id/recibo-pdf', async (req, res) => {
     
     // Columna Izquierda: Total en Dólares ($20.00 / $40.00 / etc.)
     doc.fillColor('#475569').font('Helvetica-Bold').fontSize(10).text('TOTAL PROCESADO (USD):', 55, 405);
-    doc.fillColor('#1d4ed8').font('Helvetica-Bold').fontSize(15).text(`$${parseFloat(pago.total_dolares).toFixed(2)}`, 55, 422); 
+    doc.fillColor('#065f46').font('Helvetica-Bold').fontSize(15).text(`$${parseFloat(pago.total_dolares).toFixed(2)}`, 55, 422); 
 
     // Columna Derecha: Monto Manual en Bolívares o N/A si fue en Efectivo
     const montoBsPiscina = Number(pago.total_bolivares ?? pago.monto_bolivares ?? 0);
@@ -661,7 +661,7 @@ router.get('/alumnos/:id/recibo-pdf', async (req, res) => {
       : 'N/A (Efectivo USD)';
 
     doc.fillColor('#475569').font('Helvetica-Bold').fontSize(10).text('MTO. EQUIVALENTE (VES):', 300, 405);
-    doc.fillColor('#1d4ed8').font('Helvetica-Bold').fontSize(15).text(montoBsTexto, 300, 422);
+    doc.fillColor('#065f46').font('Helvetica-Bold').fontSize(15).text(montoBsTexto, 300, 422);
 
     doc.moveTo(40, 680).lineTo(550, 680).stroke('#cbd5e1');
     doc.fillColor('#94a3b8').font('Helvetica-Oblique').fontSize(8);

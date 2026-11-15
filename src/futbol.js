@@ -792,17 +792,15 @@ router.get('/alumnos/:id/recibo-pdf', async (req, res) => {
     // TABLA O CUADRO RESUMEN DE IMPORTES
     doc.roundedRect(40, 400, 510, 60, 8).fill('#f8fafc');
     
-    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(11).text('TOTAL PROCESADO (USD $):', 60, 420);
-    doc.fillColor('#065f46').font('Helvetica-Bold').fontSize(16).text(`$${parseFloat(pago.total_dolares).toFixed(2)}`, 240, 417); 
+    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(10).text('TOTAL PROCESADO (USD):', 55, 415);
+    doc.fillColor('#065f46').font('Helvetica-Bold').fontSize(15).text(`$${parseFloat(pago.total_dolares).toFixed(2)}`, 55, 432); 
 
-    const montoBsTexto = Number(pago.monto_bolivares) > 0 
-  ? `${Number(pago.monto_bolivares).toFixed(2)} Bs.` 
-  : 'N/A (Efectivo USD)';
+    const montoBsTexto = Number(pago.total_bolivares) > 0 
+      ? `${Number(pago.total_bolivares).toFixed(2)} Bs.` 
+      : 'N/A (Efectivo USD)';
 
-doc.fillColor('#475569')
-   .font('Helvetica-Bold')
-   .fontSize(11)
-   .text(`MTO. EQUIVALENTE (VES): ${montoBsTexto}`, 300, 420);
+    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(10).text('MTO. EQUIVALENTE (VES):', 300, 415);
+    doc.fillColor('#065f46').font('Helvetica-Bold').fontSize(15).text(montoBsTexto, 300, 432);
 
     // PIE DE PÁGINA INSTITUCIONAL
     doc.moveTo(40, 680).lineTo(550, 680).stroke('#cbd5e1');

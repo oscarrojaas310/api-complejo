@@ -1384,13 +1384,16 @@ router.get('/exportar-turno-pdf', async (req, res) => {
   }
 
   try {
-    // Buscamos los alumnos inscritos en ese horario ordenados alfabéticamente
+
+    const horarioLimpio = horario.trim();
+
     const [alumnos] = await pool.query(
-      `SELECT id, nombre_alumno, edad_alumno, cedula_representante, nivel 
+      `SELECT id, nombre_alumno, edad_alumno, cedula_representante, nivel, horario_asignado 
        FROM alumnos 
        WHERE horario_asignado = ? 
+          OR horario_asignado LIKE ? 
        ORDER BY nombre_alumno ASC`,
-      [horario]
+      [horarioLimpio, `%${horarioLimpio}%`]
     );
 
     const nivelNombre = alumnos.length > 0 ? alumnos.nivel : 'Nivel General';

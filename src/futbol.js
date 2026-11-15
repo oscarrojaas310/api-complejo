@@ -1111,13 +1111,19 @@ router.get('/exportar-turno-pdf', async (req, res) => {
   }
 
   try {
-    // Buscamos los atletas inscritos en ese horario ordenados alfabéticamente
+
+    const horarioLimpio = horario.trim();
+    const esSub6 = horarioLimpio.includes('2:00 PM') || horarioLimpio.toLowerCase().includes('sub-6');
+    
+
     const [atletas] = await pool.query(
-      `SELECT id, nombre_alumno, edad_alumno, cedula_alumno, nivel 
+      `SELECT id, nombre_alumno, edad_alumno, cedula_alumno, nombre_representante, telefono_representante, nivel 
        FROM alumnos_futbol 
        WHERE horario_asignado = ? 
+          OR horario_asignado LIKE ? 
+          ${esSub6 ? "OR nivel = 'Sub-6' OR horario_asignado LIKE '%Lunes 2:00 PM%'" : ""}
        ORDER BY nombre_alumno ASC`,
-      [horario]
+      [horarioLimpio, `%${horarioLimpio}%`]
     );
 
     const categoriaNombre = atletas.length > 0 ? atletas.nivel : 'Categoría General';

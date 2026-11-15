@@ -647,15 +647,22 @@ router.get('/alumnos/:id/recibo-pdf', async (req, res) => {
     doc.text(`Meses Liquidados: ${mesesLiquidadosFinal}`, 40, 325); 
     doc.text(`Método / Referencia: ${pago.metodo_pago.toUpperCase()}`, 40, 340);
     doc.text(`Tasa de Cambio BCV: ________________ VES/USD`, 40, 355);
-
-    // Cuadro resumen de importes
+    // TABLA O CUADRO RESUMEN DE IMPORTES (PISCINA - AZUL INSTITUCIONAL)
     doc.roundedRect(40, 390, 510, 60, 8).fill('#f8fafc');
     
-    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(11).text('TOTAL PROCESADO (USD $):', 60, 410);
-    doc.fillColor('#1d4ed8').font('Helvetica-Bold').fontSize(16).text(`$${parseFloat(pago.total_dolares).toFixed(2)}`, 240, 407); 
+    // Columna Izquierda: Total en Dólares ($20.00 / $40.00 / etc.)
+    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(10).text('TOTAL PROCESADO (USD):', 55, 405);
+    doc.fillColor('#1d4ed8').font('Helvetica-Bold').fontSize(15).text(`$${parseFloat(pago.total_dolares).toFixed(2)}`, 55, 422); 
 
-    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(11).text('MTO. EQUIVALENTE (VES):______________', 300, 410);
-    // Pie de página
+    // Columna Derecha: Monto Manual en Bolívares o N/A si fue en Efectivo
+    const montoBsPiscina = Number(pago.total_bolivares ?? pago.monto_bolivares ?? 0);
+    const montoBsTexto = montoBsPiscina > 0 
+      ? `${montoBsPiscina.toFixed(2)} Bs.` 
+      : 'N/A (Efectivo USD)';
+
+    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(10).text('MTO. EQUIVALENTE (VES):', 300, 405);
+    doc.fillColor('#1d4ed8').font('Helvetica-Bold').fontSize(15).text(montoBsTexto, 300, 422);
+
     doc.moveTo(40, 680).lineTo(550, 680).stroke('#cbd5e1');
     doc.fillColor('#94a3b8').font('Helvetica-Oblique').fontSize(8);
     doc.text('Este documento digital sirve como comprobante legal de pago para la Piscina del Complejo Deportivo Los Pinos.', 40, 695, { align: 'center' });

@@ -1375,4 +1375,103 @@ router.delete('/alumnos/:id', async (req, res) => {
   }
 });
 
+// GET: Exportar lista oficial de alumnos por turno/horario en PDF con Cintillo (Piscina)
+router.get('/exportar-turno-pdf', async (req, res) => {
+  const { horario } = req.query;
+
+  if (!horario) {
+    return res.status(400).send('Falta el parámetro de horario para generar la nómina.');
+  }
+
+  try {
+    // Buscamos los alumnos inscritos en ese horario ordenados alfabéticamente
+    const [alumnos] = await pool.query(
+      `SELECT id, nombre_alumno, edad_alumno, cedula_representante, nivel 
+       FROM alumnos 
+       WHERE horario_asignado = ? 
+       ORDER BY nombre_alumno ASC`,
+      [horario]
+    );
+
+    const nivelNombre = alumnos.length > 0 ? alumnos.nivel : 'Nivel General';
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename=Nomina_Piscina_${encodeURIComponent(horario)}.pdf`);
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+
+    const doc = new PDFDocument({ size: 'LETTER', margin: 40 });
+    doc.pipe(res);
+
+    // 📸 1. INTEGRACIÓN DEL CINTILLO INSTITUCIONAL DE PISCINA
+    try {
+      // Verifica si tu archivo en public/ se llama cintillo_pago_mensualidad.png o cintillo_pago_mensualidad_piscina.png
+      const rutaCintillo = path.join(__dirname, 'public', 'cintillo_pago_mensualidad_piscina.png');
+      doc.image(rutaCintillo, 40, 30, { width: 532, height: 65 });
+    } catch (imgError) {
+      console.warn('⚠️ Advertencia: No se encontró cintillo de piscina, usando texto de respaldo.');
+      doc.fillColor('#1d4ed8').font('Helvetica-Bold').fontSize(18)
+         .text('COMPLEJO DEPORTIVO LOS PINOS — ESCUELA DE NATACIÓN', 40, 50);
+    }
+
+    // 2. BANNER DE INFORMACIÓN DEL TURNO (Azul Institucional Piscina)
+    doc.roundedRect(40, 105, 532, 46, 6).fill('#1d4ed8');
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(12)
+       .text('NÓMINA OFICIAL DE ALUMNOS POR TURNO', 52, 113);
+    doc.font('Helvetica').fontSize(8.5)
+       .text(`Nivel: ${nivelNombre}  |  Horario: ${horario}`, 52, 129);
+    doc.font('Helvetica-Bold').fontSize(8.5)
+       .text(`Total: ${alumnos.length} Alumnos`, 450, 113, { width: 110, align: 'right' });
+    doc.font('Helvetica').fontSize(8)
+       .text(`Fecha: ${new Date().toLocaleDateString('es-VE')}`, 450, 129, { width: 110, align: 'right' });
+
+    // 3. ENCABEZADO DE LA TABLA
+    let y = 165;
+    doc.rect(40, y, 532, 24).fill('#e2e8f0');
+    doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(8.5);
+    doc.text('N°', 50, y + 8, { width: 35 });
+    doc.text('Nombre Completo del Alumno', 90, y + 8, { width: 270 });
+    doc.text('Cédula Rep.', 370, y + 8, { width: 120, align: 'center' });
+    doc.text('Edad', 500, y + 8, { width: 60, align: 'center' });
+
+    y += 24;
+    doc.font('Helvetica').fontSize(9).fillColor('#0f172a');
+
+    if (alumnos.length === 0) {
+      doc.text('No hay alumnos registrados en este horario actualmente.', 50, y + 14);
+    } else {
+      alumnos.forEach((alumno, index) => {
+        if (y > 700) {
+          doc.addPage({ size: 'LETTER', margin: 40 });
+          y = 40;
+        }
+
+        if (index % 2 === 0) {
+          doc.rect(40, y, 532, 22).fill('#f8fafc');
+          doc.fillColor('#0f172a');
+        }
+
+        doc.text(`${index + 1}`, 50, y + 7, { width: 35 });
+        doc.font('Helvetica-Bold').text(alumno.nombre_alumno, 90, y + 7, { width: 270, ellipsis: true });
+        doc.font('Helvetica').text(alumno.cedula_representante || 'N/A', 370, y + 7, { width: 120, align: 'center' });
+        doc.text(`${alumno.edad_alumno} años`, 500, y + 7, { width: 60, align: 'center' });
+
+        doc.strokeColor('#f1f5f9').lineWidth(0.5).moveTo(40, y + 22).lineTo(572, y + 22).stroke();
+        y += 22;
+      });
+    }
+
+    // 4. PIE DE PÁGINA INSTITUCIONAL
+    doc.strokeColor('#cbd5e1').lineWidth(1).moveTo(40, 730).lineTo(572, 730).stroke();
+    doc.fillColor('#94a3b8').fontSize(7.5)
+       .text('Documento oficial de control interno — Complejo Deportivo Los Pinos (Mérida, Venezuela).', 40, 740, { align: 'center' });
+
+    doc.end();
+  } catch (error) {
+    console.error('❌ Error al generar PDF de turno piscina:', error);
+    if (!res.headersSent) {
+      res.status(500).send('Error interno al generar la lista del turno.');
+    }
+  }
+});
+
 module.exports = router;

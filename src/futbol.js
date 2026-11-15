@@ -1102,8 +1102,7 @@ router.delete('/alumnos/:id', async (req, res) => {
     conexion.release();
   }
 });
-
-// GET: Exportar lista oficial de atletas por turno/horario en PDF (Fútbol)
+// GET: Exportar lista oficial de atletas por turno/horario en PDF con Cintillo (Fútbol)
 router.get('/exportar-turno-pdf', async (req, res) => {
   const { horario } = req.query;
 
@@ -1112,16 +1111,16 @@ router.get('/exportar-turno-pdf', async (req, res) => {
   }
 
   try {
-    // Buscamos todos los atletas inscritos en ese horario ordenados alfabéticamente
+    // Buscamos los atletas inscritos en ese horario ordenados alfabéticamente
     const [atletas] = await pool.query(
-      `SELECT id, nombre_alumno, edad_alumno, cedula_alumno, nombre_representante, telefono_representante, nivel 
+      `SELECT id, nombre_alumno, edad_alumno, cedula_alumno, nivel 
        FROM alumnos_futbol 
        WHERE horario_asignado = ? 
        ORDER BY nombre_alumno ASC`,
       [horario]
     );
 
-    const categoriaNombre = atletas.length > 0 ? atletas[0].nivel : 'Categoría General';
+    const categoriaNombre = atletas.length > 0 ? atletas.nivel : 'Categoría General';
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename=Nomina_Futbol_${encodeURIComponent(horario)}.pdf`);
@@ -1130,30 +1129,41 @@ router.get('/exportar-turno-pdf', async (req, res) => {
     const doc = new PDFDocument({ size: 'LETTER', margin: 40 });
     doc.pipe(res);
 
-    // Banner Encabezado Verde Esmeralda (Fútbol)
-    doc.rect(40, 40, 532, 55).fill('#065f46');
-    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(14)
-       .text('ACADEMIA DE FÚTBOL LOS PINOS — NÓMINA OFICIAL', 55, 50);
-    doc.font('Helvetica').fontSize(9)
-       .text(`Categoría: ${categoriaNombre} | Horario: ${horario}`, 55, 68);
-    doc.fontSize(8)
-       .text(`Total Atletas: ${atletas.length} | Emitido: ${new Date().toLocaleDateString('es-VE')}`, 55, 80);
+    // 📸 1. INTEGRACIÓN DEL CINTILLO INSTITUCIONAL EN LA PARTE SUPERIOR
+    try {
+      const rutaCintillo = path.join(__dirname, 'public', 'cintillo_pago_mensualidad_futbol.png');
+      doc.image(rutaCintillo, 40, 30, { width: 532, height: 65 });
+    } catch (imgError) {
+      console.warn('⚠️ Advertencia: No se encontró cintillo_pago_mensualidad_futbol.png, usando texto de respaldo.');
+      doc.fillColor('#065f46').font('Helvetica-Bold').fontSize(18)
+         .text('COMPLEJO DEPORTIVO LOS PINOS — ACADEMIA DE FÚTBOL', 40, 50);
+    }
 
-    // Encabezado de Tabla
-    let y = 115;
-    doc.rect(40, y, 532, 22).fill('#e2e8f0');
-    doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(8);
-    doc.text('N°', 48, y + 7, { width: 25 });
-    doc.text('Nombre del Atleta', 75, y + 7, { width: 185 });
-    doc.text('Edad', 265, y + 7, { width: 35, align: 'center' });
-    doc.text('Representante', 305, y + 7, { width: 165 });
-    doc.text('Teléfono', 475, y + 7, { width: 90, align: 'right' });
+    // 2. BANNER DE INFORMACIÓN DEL TURNO Y CATEGORÍA (Debajo del cintillo)
+    doc.roundedRect(40, 105, 532, 46, 6).fill('#065f46');
+    doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(12)
+       .text('NÓMINA OFICIAL DE ATLETAS POR TURNO', 52, 113);
+    doc.font('Helvetica').fontSize(8.5)
+       .text(`Categoría: ${categoriaNombre}  |  Horario: ${horario}`, 52, 129);
+    doc.font('Helvetica-Bold').fontSize(8.5)
+       .text(`Total: ${atletas.length} Atletas`, 450, 113, { width: 110, align: 'right' });
+    doc.font('Helvetica').fontSize(8)
+       .text(`Fecha: ${new Date().toLocaleDateString('es-VE')}`, 450, 129, { width: 110, align: 'right' });
 
-    y += 22;
-    doc.font('Helvetica').fontSize(8.5).fillColor('#0f172a');
+    // 3. ENCABEZADO DE LA TABLA (Sin Representante ni Teléfono -> Con Cédula Atleta)
+    let y = 165;
+    doc.rect(40, y, 532, 24).fill('#e2e8f0');
+    doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(8.5);
+    doc.text('N°', 50, y + 8, { width: 35 });
+    doc.text('Nombre Completo del Atleta', 90, y + 8, { width: 270 });
+    doc.text('Cédula Atleta', 370, y + 8, { width: 120, align: 'center' });
+    doc.text('Edad', 500, y + 8, { width: 60, align: 'center' });
+
+    y += 24;
+    doc.font('Helvetica').fontSize(9).fillColor('#0f172a');
 
     if (atletas.length === 0) {
-      doc.text('No hay atletas registrados en este horario actualmente.', 48, y + 12);
+      doc.text('No hay atletas registrados en este horario actualmente.', 50, y + 14);
     } else {
       atletas.forEach((atleta, index) => {
         if (y > 700) {
@@ -1162,22 +1172,21 @@ router.get('/exportar-turno-pdf', async (req, res) => {
         }
 
         if (index % 2 === 0) {
-          doc.rect(40, y, 532, 20).fill('#f8fafc');
+          doc.rect(40, y, 532, 22).fill('#f8fafc');
           doc.fillColor('#0f172a');
         }
 
-        doc.text(`${index + 1}`, 48, y + 6, { width: 25 });
-        doc.font('Helvetica-Bold').text(atleta.nombre_alumno, 75, y + 6, { width: 185, ellipsis: true });
-        doc.font('Helvetica').text(`${atleta.edad_alumno}a`, 265, y + 6, { width: 35, align: 'center' });
-        doc.text(atleta.nombre_representante, 305, y + 6, { width: 165, ellipsis: true });
-        doc.text(atleta.telefono_representante || 'N/A', 475, y + 6, { width: 90, align: 'right' });
+        doc.text(`${index + 1}`, 50, y + 7, { width: 35 });
+        doc.font('Helvetica-Bold').text(atleta.nombre_alumno, 90, y + 7, { width: 270, ellipsis: true });
+        doc.font('Helvetica').text(atleta.cedula_alumno || 'N/A', 370, y + 7, { width: 120, align: 'center' });
+        doc.text(`${atleta.edad_alumno} años`, 500, y + 7, { width: 60, align: 'center' });
 
-        doc.strokeColor('#f1f5f9').lineWidth(0.5).moveTo(40, y + 20).lineTo(572, y + 20).stroke();
-        y += 20;
+        doc.strokeColor('#f1f5f9').lineWidth(0.5).moveTo(40, y + 22).lineTo(572, y + 22).stroke();
+        y += 22;
       });
     }
 
-    // Pie de página
+    // 4. PIE DE PÁGINA INSTITUCIONAL
     doc.strokeColor('#cbd5e1').lineWidth(1).moveTo(40, 730).lineTo(572, 730).stroke();
     doc.fillColor('#94a3b8').fontSize(7.5)
        .text('Documento oficial de control interno — Complejo Deportivo Los Pinos (Mérida, Venezuela).', 40, 740, { align: 'center' });

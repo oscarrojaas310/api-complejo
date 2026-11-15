@@ -645,8 +645,8 @@ router.get('/alumnos/:id/recibo-pdf', async (req, res) => {
 
     doc.fillColor('#1e293b').font('Helvetica');
     doc.text(`Meses Liquidados: ${mesesLiquidadosFinal}`, 40, 325); 
-    doc.text(`Método / Referencia: ${pago.metodo_pago.toUpperCase()}`, 40, 340);
-    doc.text(`Tasa de Cambio BCV: ________________ VES/USD`, 40, 355);
+    doc.text(`Canal de Pago: ${pago.metodo_pago.toUpperCase()}`, 40, 340);
+    doc.text(`Referencia Bancaria: N/A`, 40, 355);
     // TABLA O CUADRO RESUMEN DE IMPORTES (PISCINA - AZUL INSTITUCIONAL)
     doc.roundedRect(40, 390, 510, 60, 8).fill('#f8fafc');
     

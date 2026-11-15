@@ -795,7 +795,15 @@ router.get('/alumnos/:id/recibo-pdf', async (req, res) => {
     doc.fillColor('#475569').font('Helvetica-Bold').fontSize(11).text('TOTAL PROCESADO (USD $):', 60, 420);
     doc.fillColor('#065f46').font('Helvetica-Bold').fontSize(16).text(`$${parseFloat(pago.total_dolares).toFixed(2)}`, 240, 417); 
 
-    doc.fillColor('#475569').font('Helvetica-Bold').fontSize(11).text('MTO. EQUIVALENTE (VES): _________________', 300, 420);
+    const montoBsTexto = Number(pago.monto_bolivares) > 0 
+  ? `${Number(pago.monto_bolivares).toFixed(2)} Bs.` 
+  : 'N/A (Efectivo USD)';
+
+doc.fillColor('#475569')
+   .font('Helvetica-Bold')
+   .fontSize(11)
+   .text(`MTO. EQUIVALENTE (VES): ${montoBsTexto}`, 300, 420);
+
     // PIE DE PÁGINA INSTITUCIONAL
     doc.moveTo(40, 680).lineTo(550, 680).stroke('#cbd5e1');
     doc.fillColor('#94a3b8').font('Helvetica-Oblique').fontSize(8);

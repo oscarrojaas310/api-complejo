@@ -67,10 +67,19 @@ router.post('/inscripciones', async (req, res) => {
   const nivel = partesBloque[0];           // Ej: "Sub-6" o "Rango 9 a 14 años (Mañana)"
   const horario_asignado = partesBloque[1]; // Ej: "Lunes, Miércoles y Viernes: 08:00 AM - 09:15 AM"
 
+  const conexion = await pool.getConnection();
+
   try {
-    // 3. Sentencia SQL apuntando al nombre oficial de tu tabla: 'alumnos_futbol'
+    await conexion.beginTransaction();
+
+    // 🔒 Blindaje contra saltos de 30,000 en TiDB: calculamos el siguiente ID consecutivo real
+    const [filasMax] = await conexion.query('SELECT COALESCE(MAX(id), 0) + 1 AS siguienteId FROM alumnos_futbol FOR UPDATE');
+    const siguienteId = Number(filasMax[0]?.siguienteId || 1);
+
+    // 3. Sentencia SQL apuntando al nombre oficial de tu tabla: 'alumnos_futbol' incluyendo `id`
     const queryText = `
       INSERT INTO alumnos_futbol (
+        id,
         nombre_alumno, 
         edad_alumno, 
         fecha_nacimiento,
@@ -85,10 +94,11 @@ router.post('/inscripciones', async (req, res) => {
         horario_asignado,
         registrado_el
       ) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW());
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW());
     `;
 
     const values = [
+      siguienteId,
       nombre_alumno,
       parseInt(edad_alumno, 10),
       fecha_nacimiento,       // Formato string de fecha nativa 'YYYY-MM-DD'
@@ -103,18 +113,22 @@ router.post('/inscripciones', async (req, res) => {
       horario_asignado
     ];
 
-const [resultado] = await pool.query(queryText, values);
+    await conexion.query(queryText, values);
+    await conexion.commit();
 
-return res.status(201).json({
-  mensaje: '¡Atleta registrado con éxito!',
-  id: resultado.insertId // 👈 Asegura que el pago offline reciba el ID real de MySQL
-});
+    return res.status(201).json({
+      mensaje: '¡Atleta registrado con éxito!',
+      id: siguienteId // 👈 Devuelve el ID consecutivo real al modo offline
+    });
 
   } catch (error) {
+    await conexion.rollback();
     console.error('❌ Error al insertar en MySQL (Fútbol):', error);
     return res.status(500).json({ 
       error: 'Error interno en el servidor al guardar la matrícula de fútbol.' 
     });
+  } finally {
+    conexion.release();
   }
 });
 // GET: Panel de control con mallas horarias oficiales de la Academia de Fútbol
@@ -420,9 +434,7 @@ router.post('/pagos', async (req, res) => {
     const tasaSegura = parseFloat(tasa_bcv) || 1;
     const bsTotalManual = parseFloat(monto_bolivares) || 0;
 
-    // =========================================================================
     // CASO 1: Ponerse al Día Total (Deuda Vieja + Mes donde ocurrió el Pago)
-    // =========================================================================
     if (mes_pagado === "Ponerse al Día Total" || mes_pagado.includes("Ponerse al Día")) {
       const cantidadTotalFilas = Math.max(1, Math.round(parseFloat(monto_dolares) / 15));
       const mesesDeDeudaViejos = cantidadTotalFilas - 1; 
@@ -450,10 +462,7 @@ router.post('/pagos', async (req, res) => {
       await conexion.commit();
       return res.status(201).json({ mensaje: '¡Cuenta liquidada por completo de forma retroactiva!' });
     }
-
-    // =========================================================================
     // CASO 2: Abonar meses de deuda (Únicamente ciclos vencidos hacia atrás)
-    // =========================================================================
     if (mes_pagado.includes("Abonar 1 Mes") || mes_pagado.includes("Pagar 2 Meses") || mes_pagado.includes("Pagar Toda la Deuda") || mes_pagado.includes("Pendiente")) {
       const mesesViejosAPagar = Math.max(1, Math.round(parseFloat(monto_dolares) / 15));
       const bsPorMes = bsTotalManual > 0 ? (bsTotalManual / mesesViejosAPagar).toFixed(2) : 0;
@@ -474,9 +483,7 @@ router.post('/pagos', async (req, res) => {
       return res.status(201).json({ mensaje: 'Abono a la deuda de fútbol registrado retroactivamente.' });
     }
 
-    // =========================================================================
     // CASO 3: Mensualidad regular estándar del mes en curso
-    // =========================================================================
     await conexion.query(query, [
       idActual,
       parseInt(alumno_id, 10), 
@@ -834,22 +841,42 @@ router.post('/asistencias', async (req, res) => {
 
     console.log(`⏳ [Fútbol] Actualizando malla horaria ${horario} del día ${fecha}...`);
 
-    // 💡 SOLUCIÓN REAL: ON DUPLICATE KEY UPDATE pisa el valor sin borrar la fila completa
+    // 1. Consultamos el último ID real de `asistencias_futbol` bloqueando la lectura por milisegundos
+    const [filasMax] = await conexion.query('SELECT COALESCE(MAX(id), 0) + 1 AS siguienteId FROM asistencias_futbol FOR UPDATE');
+    let idActual = Number(filasMax[0]?.siguienteId || 1);
+
     const querySQL = `
-      INSERT INTO asistencias_futbol (alumno_id, fecha, horario, bloque, asistio) 
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO asistencias_futbol (id, alumno_id, fecha, horario, bloque, asistio) 
+      VALUES (?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE 
         asistio = VALUES(asistio)
     `;
 
+    // 2. Ejecutamos cada registro verificando si ya existía ese día para no desperdiciar IDs al editar
     for (const reg of registros) {
-      await conexion.query(querySQL, [
-        parseInt(reg.alumno_id, 10),
-        fecha,
-        horario,
-        bloque,
-        parseInt(reg.asistio, 10)
-      ]);
+      const alumnoId = parseInt(reg.alumno_id, 10);
+      const asistioVal = parseInt(reg.asistio, 10);
+
+      const [existe] = await conexion.query(
+        'SELECT id FROM asistencias_futbol WHERE alumno_id = ? AND fecha = ? LIMIT 1',
+        [alumnoId, fecha]
+      );
+
+      if (existe.length > 0) {
+        await conexion.query(
+          'UPDATE asistencias_futbol SET asistio = ?, bloque = ?, horario = ? WHERE id = ?',
+          [asistioVal, bloque, horario, existe[0].id]
+        );
+      } else {
+        await conexion.query(querySQL, [
+          idActual++,
+          alumnoId,
+          fecha,
+          horario,
+          bloque,
+          asistioVal
+        ]);
+      }
     }
 
     await conexion.commit();
@@ -1114,7 +1141,7 @@ router.get('/exportar-turno-pdf', async (req, res) => {
 
     const horarioLimpio = horario.trim();
     const esSub6 = horarioLimpio.includes('2:00 PM') || horarioLimpio.toLowerCase().includes('sub-6');
-    
+
 
     const [atletas] = await pool.query(
       `SELECT id, nombre_alumno, edad_alumno, cedula_alumno, nombre_representante, telefono_representante, nivel 

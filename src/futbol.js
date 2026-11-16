@@ -1167,7 +1167,7 @@ router.get('/exportar-turno-pdf', async (req, res) => {
       const rutaCintillo = path.join(__dirname, 'public', 'cintillo_pago_mensualidad_futbol.png');
       doc.image(rutaCintillo, 40, 30, { width: 532, height: 65 });
     } catch (imgError) {
-      console.warn('⚠️ Advertencia: No se encontró cintillo_pago_mensualidad_futbol.png, usando texto de respaldo.');
+      console.warn('⚠️ Advertencia: No se encontró cintillo_a.png, usando texto de respaldo.');
       doc.fillColor('#065f46').font('Helvetica-Bold').fontSize(18)
          .text('COMPLEJO DEPORTIVO LOS PINOS — ACADEMIA DE FÚTBOL', 40, 50);
     }

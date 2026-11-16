@@ -1164,7 +1164,7 @@ router.get('/exportar-turno-pdf', async (req, res) => {
 
     // 📸 1. INTEGRACIÓN DEL CINTILLO INSTITUCIONAL EN LA PARTE SUPERIOR
     try {
-      const rutaCintillo = path.join(__dirname, 'public', 'cintillo_pago_mensualidad_futbol.png');
+      const rutaCintillo = path.join(__dirname, 'public', 'cintillo_a.png');
       doc.image(rutaCintillo, 40, 30, { width: 532, height: 65 });
     } catch (imgError) {
       console.warn('⚠️ Advertencia: No se encontró cintillo_a.png, usando texto de respaldo.');

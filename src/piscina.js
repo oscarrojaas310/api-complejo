@@ -1409,7 +1409,7 @@ router.get('/exportar-turno-pdf', async (req, res) => {
     // 📸 1. INTEGRACIÓN DEL CINTILLO INSTITUCIONAL DE PISCINA
     try {
       // Verifica si tu archivo en public/ se llama cintillo_pago_mensualidad.png o cintillo_pago_mensualidad_piscina.png
-      const rutaCintillo = path.join(__dirname, 'public', 'cintillo_pago_mensualidad_piscina.png');
+      const rutaCintillo = path.join(__dirname, 'public', 'cintillo_b.png');
       doc.image(rutaCintillo, 40, 30, { width: 532, height: 65 });
     } catch (imgError) {
       console.warn('⚠️ Advertencia: No se encontró cintillo de piscina, usando texto de respaldo.');

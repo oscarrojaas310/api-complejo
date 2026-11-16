@@ -255,7 +255,7 @@ router.get('/reporte-general', async (req, res) => {
     });
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline; filename=Balance_General_Caja_Futbol.pdf');
+    res.setHeader('Content-Disposition', 'inline; filename=Balance_General_Caja_Piscina.pdf');
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
@@ -264,11 +264,11 @@ router.get('/reporte-general', async (req, res) => {
     doc.pipe(res);
 
     // Banner Principal (Verde oscuro corporativo de fútbol)
-    let subTextoRango = `Consolidado Completo - Academia de Fútbol`;
+    let subTextoRango = `Consolidado Completo - Piscina`;
     if (inicio && fin) subTextoRango = `Balance Cronológico desde ${inicio} hasta ${fin}`;
     
     doc.rect(40, 40, 712, 50).fill('#064e3b');
-    doc.fillColor('#ffffff').fontSize(14).font('Helvetica-Bold').text('REPORTE GENERAL DE INGRESOS Y AUDITORÍA DE CAJA (FÚTBOL)', 55, 50);
+    doc.fillColor('#ffffff').fontSize(14).font('Helvetica-Bold').text('REPORTE GENERAL DE INGRESOS Y AUDITORÍA DE CAJA (Piscina)', 55, 50);
     doc.fontSize(8).font('Helvetica-Oblique').text(`${subTextoRango} | Generado: ${new Date().toLocaleString('es-VE')}`, 55, 68);
 
     // Tarjetas Informativas Dinámicas
@@ -1413,12 +1413,12 @@ router.get('/exportar-turno-pdf', async (req, res) => {
       doc.image(rutaCintillo, 40, 30, { width: 532, height: 65 });
     } catch (imgError) {
       console.warn('⚠️ Advertencia: No se encontró cintillo de piscina, usando texto de respaldo.');
-      doc.fillColor('#1d4ed8').font('Helvetica-Bold').fontSize(18)
+      doc.fillColor('#065f46').font('Helvetica-Bold').fontSize(18)
          .text('COMPLEJO DEPORTIVO LOS PINOS — ESCUELA DE NATACIÓN', 40, 50);
     }
 
     // 2. BANNER DE INFORMACIÓN DEL TURNO (Azul Institucional Piscina)
-    doc.roundedRect(40, 105, 532, 46, 6).fill('#1d4ed8');
+    doc.roundedRect(40, 105, 532, 46, 6).fill('#065f46');
     doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(12)
        .text('NÓMINA OFICIAL DE ALUMNOS POR TURNO', 52, 113);
     doc.font('Helvetica').fontSize(8.5)
